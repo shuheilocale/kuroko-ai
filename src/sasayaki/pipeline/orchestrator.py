@@ -29,6 +29,8 @@ class Pipeline:
         self._llm_task: asyncio.Task | None = None
         self._keyword_task: asyncio.Task | None = None
         self._keyword_processed_texts: list[str] = []
+        self._tasks: list[asyncio.Task] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -36,6 +38,7 @@ class Pipeline:
                 transcripts=list(self.state.transcripts),
                 entities=list(self.state.entities),
                 suggestions=list(self.state.suggestions),
+                suggesting=self.state.suggesting,
                 is_running=self.state.is_running,
                 error=self.state.error,
                 system_device=self.state.system_device,
@@ -49,6 +52,22 @@ class Pipeline:
             self._lookup_and_add(term),
             self._loop,
         )
+
+    def request_stop(self):
+        """Request the pipeline to stop. Safe to call from any thread."""
+        if self._loop is None:
+            return
+        for task in self._tasks:
+            self._loop.call_soon_threadsafe(task.cancel)
+
+    def reset_state(self):
+        """Clear all accumulated state for a fresh restart."""
+        with self._lock:
+            self.state = PipelineState()
+        self._llm_task = None
+        self._keyword_task = None
+        self._keyword_processed_texts = []
+        self._tasks = []
 
     async def run(self):
         logger.info("Pipeline starting...")
@@ -119,7 +138,7 @@ class Pipeline:
 
         logger.info("Pipeline running. Listening...")
 
-        tasks = [
+        self._tasks = [
             asyncio.create_task(system_vad.run(), name="system_vad"),
             asyncio.create_task(mic_vad.run(), name="mic_vad"),
             asyncio.create_task(
@@ -134,7 +153,7 @@ class Pipeline:
         ]
 
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*self._tasks)
         except asyncio.CancelledError:
             pass
         finally:
@@ -220,6 +239,17 @@ class Pipeline:
             existing = {e.term for e in self.state.entities}
             if term in existing:
                 return
+            # Add placeholder immediately so UI can show loading state
+            self.state.entities.append(EntityEvent(
+                term=term,
+                definition="",
+                timestamp=time.monotonic(),
+                loading=True,
+            ))
+            if len(self.state.entities) > self.config.ui_max_entity_rows:
+                self.state.entities = self.state.entities[
+                    -self.config.ui_max_entity_rows:
+                ]
 
         definition = await self._wiki.lookup(term)
         source = "wiki"
@@ -240,28 +270,34 @@ class Pipeline:
                 definition = getattr(msg, "content", "") or msg.get("content", "")
             except Exception:
                 logger.warning("LLM explain failed for: %s", term)
+                # Remove the placeholder on failure
+                with self._lock:
+                    self.state.entities = [
+                        e for e in self.state.entities if e.term != term
+                    ]
                 return
 
         if definition:
             logger.info("Keyword added [%s]: %s", source, term)
             with self._lock:
-                self.state.entities.append(EntityEvent(
-                    term=term,
-                    definition=definition.strip(),
-                    timestamp=time.monotonic(),
-                ))
-                if len(self.state.entities) > self.config.ui_max_entity_rows:
-                    self.state.entities = self.state.entities[
-                        -self.config.ui_max_entity_rows:
-                    ]
+                for e in self.state.entities:
+                    if e.term == term:
+                        e.definition = definition.strip()
+                        e.loading = False
+                        break
 
     async def _generate_suggestions(self, suggester: ResponseSuggester):
         await asyncio.sleep(self.config.llm_debounce_sec)
 
         with self._lock:
+            self.state.suggesting = True
             transcripts = list(self.state.transcripts)
 
-        suggestions = await suggester.suggest(transcripts)
-        if suggestions:
+        try:
+            suggestions = await suggester.suggest(transcripts)
+            if suggestions:
+                with self._lock:
+                    self.state.suggestions = suggestions
+        finally:
             with self._lock:
-                self.state.suggestions = suggestions
+                self.state.suggesting = False

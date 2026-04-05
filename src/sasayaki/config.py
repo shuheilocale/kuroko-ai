@@ -46,6 +46,5 @@ class Config:
     llm_debounce_sec: float = 1.5
 
     # UI
-    ui_poll_interval_sec: float = 0.3
     ui_max_transcript_messages: int = 100
     ui_max_entity_rows: int = 50
