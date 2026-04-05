@@ -203,18 +203,29 @@ class Pipeline:
 
     async def _extract_keywords(self, text: str):
         """Extract keywords using LLM, then look up definitions."""
+        logger.info("Extracting keywords from: %s", text[:80])
         terms = await self._keyword_extractor.extract(text)
+        logger.info("Extracted terms: %s", terms)
         if not terms:
             return
 
-        await asyncio.gather(*(self._lookup_and_add(t) for t in terms))
+        # Look up terms sequentially to avoid Ollama request contention
+        for term in terms:
+            await self._lookup_and_add(term)
 
     async def _lookup_and_add(self, term: str):
-        """Look up a term on Wikipedia, fallback to LLM explanation."""
+        """Look up a term: try Wikipedia first, fallback to LLM."""
+        # Check duplicate before doing any work
+        with self._lock:
+            existing = {e.term for e in self.state.entities}
+            if term in existing:
+                return
+
         definition = await self._wiki.lookup(term)
+        source = "wiki"
 
         if not definition:
-            # Fallback: ask LLM to explain
+            source = "llm"
             try:
                 response = await self._ollama_client.chat(
                     model=self.config.ollama_model,
@@ -228,23 +239,21 @@ class Pipeline:
                 msg = response["message"]
                 definition = getattr(msg, "content", "") or msg.get("content", "")
             except Exception:
-                logger.debug("LLM explain failed for: %s", term)
+                logger.warning("LLM explain failed for: %s", term)
                 return
 
         if definition:
+            logger.info("Keyword added [%s]: %s", source, term)
             with self._lock:
-                # Avoid duplicate terms in the entity list
-                existing = {e.term for e in self.state.entities}
-                if term not in existing:
-                    self.state.entities.append(EntityEvent(
-                        term=term,
-                        definition=definition.strip(),
-                        timestamp=time.monotonic(),
-                    ))
-                    if len(self.state.entities) > self.config.ui_max_entity_rows:
-                        self.state.entities = self.state.entities[
-                            -self.config.ui_max_entity_rows:
-                        ]
+                self.state.entities.append(EntityEvent(
+                    term=term,
+                    definition=definition.strip(),
+                    timestamp=time.monotonic(),
+                ))
+                if len(self.state.entities) > self.config.ui_max_entity_rows:
+                    self.state.entities = self.state.entities[
+                        -self.config.ui_max_entity_rows:
+                    ]
 
     async def _generate_suggestions(self, suggester: ResponseSuggester):
         await asyncio.sleep(self.config.llm_debounce_sec)
