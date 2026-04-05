@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+from itertools import groupby
 
 from nicegui import ui
 
@@ -45,7 +46,10 @@ class NiceGuiApp:
                 <style>
                     .transcript-box { min-height: 400px; max-height: 500px; overflow-y: auto; }
                     .keyword-box { min-height: 400px; max-height: 500px; overflow-y: auto; }
-                    .suggestion-box { min-height: 400px; }
+                    .profile-box { min-height: 400px; max-height: 500px; overflow-y: auto; }
+                    .profile-name { font-size: 1.3em; font-weight: bold; margin-bottom: 8px; }
+                    .profile-category { font-weight: 600; color: #1565c0; margin-top: 8px; }
+                    .profile-fact { padding: 2px 0 2px 12px; border-left: 2px solid #e0e0e0; margin: 2px 0; }
                     .chat-msg { padding: 6px 12px; border-radius: 12px; margin: 2px 0; max-width: 85%; }
                     .chat-mic { background: #e3f2fd; align-self: flex-end; }
                     .chat-system { background: #f3e5f5; align-self: flex-start; }
@@ -125,12 +129,16 @@ class NiceGuiApp:
                         "keyword-box w-full"
                     )
 
-                # Right: Suggestions
+                # Right: Profile
                 with ui.card().classes("w-full"):
-                    ui.label("応答候補").classes("text-lg font-semibold")
-                    suggestions_container = ui.column().classes(
-                        "suggestion-box w-full"
+                    ui.label("相手のプロフィール").classes("text-lg font-semibold")
+                    profile_container = ui.column().classes(
+                        "profile-box w-full"
                     )
+
+            # Suggestions: collapsible below the grid
+            with ui.expansion("応答候補").classes("w-full"):
+                suggestions_container = ui.column().classes("w-full")
 
             # Timer-based update via WebSocket push
             def poll():
@@ -170,6 +178,42 @@ class NiceGuiApp:
                             "text-gray-400 italic"
                         )
 
+                # Profile
+                profile_container.clear()
+                with profile_container:
+                    profile = state.profile
+                    if profile.name:
+                        ui.label(profile.name).classes("profile-name")
+                    if profile.summary:
+                        ui.label(profile.summary).classes(
+                            "text-sm text-gray-600 italic"
+                        )
+                        ui.separator()
+                    if profile.facts:
+                        sorted_facts = sorted(
+                            profile.facts, key=lambda f: f.category
+                        )
+                        for category, group in groupby(
+                            sorted_facts, key=lambda f: f.category
+                        ):
+                            ui.label(category).classes("profile-category")
+                            for fact in group:
+                                ui.label(f"  {fact.content}").classes(
+                                    "profile-fact"
+                                )
+                    elif state.profiling:
+                        with ui.row().classes(
+                            "items-center gap-2 loading-pulse"
+                        ):
+                            ui.spinner(size="sm")
+                            ui.label("プロフィールを分析中").classes(
+                                "text-sm loading-dots"
+                            )
+                    else:
+                        ui.label("会話からプロフィールを構築中...").classes(
+                            "text-gray-400 italic"
+                        )
+
                 # Suggestions
                 suggestions_container.clear()
                 with suggestions_container:
@@ -205,7 +249,8 @@ class NiceGuiApp:
                         f"**Status:** 録音中... | "
                         f"**Ollama:** {ollama_status} | "
                         f"発話: {len(state.transcripts)}件, "
-                        f"キーワード: {len(state.entities)}件"
+                        f"キーワード: {len(state.entities)}件, "
+                        f"プロフィール: {len(state.profile.facts)}件"
                     )
                 else:
                     status_label.set_content("**Status:** 停止中")

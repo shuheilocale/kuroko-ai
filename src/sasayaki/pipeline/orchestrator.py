@@ -9,10 +9,11 @@ from sasayaki.asr.transcriber import Transcriber
 from sasayaki.audio.capture import AudioCapture
 from sasayaki.audio.vad import VadGate
 from sasayaki.config import Config
+from sasayaki.llm.profiler import ProfileExtractor
 from sasayaki.llm.suggester import ResponseSuggester
 from sasayaki.nlp.keyword_extractor import KeywordExtractor
 from sasayaki.nlp.wiki import WikiLookup
-from sasayaki.types import EntityEvent, PipelineState, TranscriptEvent
+from sasayaki.types import EntityEvent, PartnerProfile, PipelineState, TranscriptEvent
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ class Pipeline:
         self._llm_task: asyncio.Task | None = None
         self._keyword_task: asyncio.Task | None = None
         self._keyword_processed_texts: list[str] = []
+        self._profile_task: asyncio.Task | None = None
+        self._profile_processed_idx: int = 0
         self._tasks: list[asyncio.Task] = []
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -39,6 +42,12 @@ class Pipeline:
                 entities=list(self.state.entities),
                 suggestions=list(self.state.suggestions),
                 suggesting=self.state.suggesting,
+                profile=PartnerProfile(
+                    name=self.state.profile.name,
+                    facts=list(self.state.profile.facts),
+                    summary=self.state.profile.summary,
+                ),
+                profiling=self.state.profiling,
                 is_running=self.state.is_running,
                 error=self.state.error,
                 system_device=self.state.system_device,
@@ -67,6 +76,8 @@ class Pipeline:
         self._llm_task = None
         self._keyword_task = None
         self._keyword_processed_texts = []
+        self._profile_task = None
+        self._profile_processed_idx = 0
         self._tasks = []
 
     async def run(self):
@@ -117,6 +128,7 @@ class Pipeline:
         self._keyword_extractor = KeywordExtractor(config=self.config)
         self._wiki = WikiLookup(config=self.config)
         self._ollama_client = ollama.AsyncClient()
+        self._profiler = ProfileExtractor(config=self.config)
         suggester = ResponseSuggester(config=self.config)
 
         # Check Ollama
@@ -220,6 +232,13 @@ class Pipeline:
                     self._generate_suggestions(suggester)
                 )
 
+            # Profile extraction: trigger on final system speech
+            if ollama_ok and event.source == "system" and not event.is_partial:
+                if self._profile_task is None or self._profile_task.done():
+                    self._profile_task = asyncio.create_task(
+                        self._extract_profile()
+                    )
+
     async def _extract_keywords(self, text: str):
         """Extract keywords using LLM, then look up definitions."""
         logger.info("Extracting keywords from: %s", text[:80])
@@ -231,6 +250,66 @@ class Pipeline:
         # Look up terms sequentially to avoid Ollama request contention
         for term in terms:
             await self._lookup_and_add(term)
+
+    async def _extract_profile(self):
+        """Extract profile facts about the conversation partner from recent speech."""
+        await asyncio.sleep(self.config.llm_debounce_sec)
+
+        with self._lock:
+            transcripts = list(self.state.transcripts)
+            existing_profile = PartnerProfile(
+                name=self.state.profile.name,
+                facts=list(self.state.profile.facts),
+                summary=self.state.profile.summary,
+            )
+            self.state.profiling = True
+
+        new_transcripts = transcripts[self._profile_processed_idx:]
+        self._profile_processed_idx = len(transcripts)
+
+        if not new_transcripts:
+            with self._lock:
+                self.state.profiling = False
+            return
+
+        # Build context with speaker labels
+        lines = []
+        for t in new_transcripts:
+            speaker = "自分" if t.source == "mic" else "相手"
+            lines.append(f"{speaker}: 「{t.text}」")
+        new_text = "\n".join(lines)
+
+        try:
+            facts = await self._profiler.extract(new_text, existing_profile)
+            logger.info("Profile facts extracted: %s", [(f.category, f.content) for f in facts])
+            if facts:
+                with self._lock:
+                    for fact in facts:
+                        self.state.profile.facts.append(fact)
+                        if fact.category == "名前" and not self.state.profile.name:
+                            self.state.profile.name = fact.content
+                    # Trim to max
+                    if len(self.state.profile.facts) > self.config.profile_max_facts:
+                        self.state.profile.facts = self.state.profile.facts[
+                            -self.config.profile_max_facts:
+                        ]
+
+                # Generate summary periodically
+                with self._lock:
+                    fact_count = len(self.state.profile.facts)
+                    profile_copy = PartnerProfile(
+                        name=self.state.profile.name,
+                        facts=list(self.state.profile.facts),
+                        summary=self.state.profile.summary,
+                    )
+                if fact_count > 0 and fact_count % self.config.profile_summary_interval == 0:
+                    summary = await self._profiler.generate_summary(profile_copy)
+                    if summary:
+                        with self._lock:
+                            self.state.profile.summary = summary.strip()
+        finally:
+            with self._lock:
+                self.state.profiling = False
 
     async def _lookup_and_add(self, term: str):
         """Look up a term: try Wikipedia first, fallback to LLM."""

@@ -45,6 +45,10 @@ class Config:
     llm_context_turns: int = 5
     llm_debounce_sec: float = 1.5
 
+    # Profile
+    profile_max_facts: int = 50
+    profile_summary_interval: int = 5
+
     # UI
     ui_max_transcript_messages: int = 100
     ui_max_entity_rows: int = 50
