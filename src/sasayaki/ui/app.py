@@ -24,6 +24,7 @@ class GradioApp:
             title="ささやき女将 - AI Meeting Assistant",
         ) as app:
             gr.Markdown("# 🏮 ささやき女将 — AI Meeting Assistant")
+            status = gr.Markdown("**Status:** 起動中...")
 
             with gr.Row():
                 with gr.Column(scale=2):
@@ -54,9 +55,6 @@ class GradioApp:
                         value="*相手の発話を待っています...*",
                         elem_classes="suggestion-box",
                     )
-
-            with gr.Row():
-                status = gr.Markdown("**Status:** 起動中...")
 
             # Manual keyword lookup
             keyword_btn.click(
