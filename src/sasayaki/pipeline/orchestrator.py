@@ -3,16 +3,20 @@ import logging
 import threading
 import time
 
+import ollama
+
 from sasayaki.asr.transcriber import Transcriber
 from sasayaki.audio.capture import AudioCapture
 from sasayaki.audio.vad import VadGate
 from sasayaki.config import Config
 from sasayaki.llm.suggester import ResponseSuggester
-from sasayaki.nlp.ner import EntityExtractor
+from sasayaki.nlp.keyword_extractor import KeywordExtractor
 from sasayaki.nlp.wiki import WikiLookup
 from sasayaki.types import EntityEvent, PipelineState, TranscriptEvent
 
 logger = logging.getLogger(__name__)
+
+EXPLAIN_PROMPT = "以下の用語を1〜2文で簡潔に説明してください。余計な前置きは不要です。"
 
 
 class Pipeline:
@@ -23,6 +27,7 @@ class Pipeline:
         self.state = PipelineState()
         self._lock = threading.Lock()
         self._llm_task: asyncio.Task | None = None
+        self._keyword_task: asyncio.Task | None = None
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -37,9 +42,16 @@ class Pipeline:
                 ollama_ok=self.state.ollama_ok,
             )
 
+    def add_manual_keyword(self, term: str):
+        """Add a keyword manually from the UI."""
+        asyncio.run_coroutine_threadsafe(
+            self._lookup_and_add(term),
+            self._loop,
+        )
+
     async def run(self):
         logger.info("Pipeline starting...")
-        loop = asyncio.get_event_loop()
+        self._loop = asyncio.get_event_loop()
 
         # Queues
         system_audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -50,8 +62,14 @@ class Pipeline:
 
         # Audio capture
         try:
-            system_capture = AudioCapture(config=self.config, source="system", queue=system_audio_q, loop=loop)
-            mic_capture = AudioCapture(config=self.config, source="mic", queue=mic_audio_q, loop=loop)
+            system_capture = AudioCapture(
+                config=self.config, source="system",
+                queue=system_audio_q, loop=self._loop,
+            )
+            mic_capture = AudioCapture(
+                config=self.config, source="mic",
+                queue=mic_audio_q, loop=self._loop,
+            )
         except RuntimeError as e:
             logger.error("Audio device error: %s", e)
             with self._lock:
@@ -59,22 +77,35 @@ class Pipeline:
             return
 
         # VAD
-        system_vad = VadGate(config=self.config, source="system", input_queue=system_audio_q, output_queue=system_speech_q)
-        mic_vad = VadGate(config=self.config, source="mic", input_queue=mic_audio_q, output_queue=mic_speech_q)
+        system_vad = VadGate(
+            config=self.config, source="system",
+            input_queue=system_audio_q, output_queue=system_speech_q,
+        )
+        mic_vad = VadGate(
+            config=self.config, source="mic",
+            input_queue=mic_audio_q, output_queue=mic_speech_q,
+        )
 
-        # ASR - merge both speech queues into a single transcriber queue
+        # ASR
         merged_speech_q: asyncio.Queue = asyncio.Queue(maxsize=20)
-        transcriber = Transcriber(config=self.config, input_queue=merged_speech_q, output_queue=transcript_q)
+        transcriber = Transcriber(
+            config=self.config,
+            input_queue=merged_speech_q, output_queue=transcript_q,
+        )
 
         # NLP & LLM
-        ner = EntityExtractor(config=self.config)
-        wiki = WikiLookup(config=self.config)
+        self._keyword_extractor = KeywordExtractor(config=self.config)
+        self._wiki = WikiLookup(config=self.config)
+        self._ollama_client = ollama.AsyncClient()
         suggester = ResponseSuggester(config=self.config)
 
         # Check Ollama
         ollama_ok = await suggester.health_check()
         if not ollama_ok:
-            logger.warning("Ollama not available or model not found. Suggestions will be disabled.")
+            logger.warning(
+                "Ollama not available or model not found. "
+                "Suggestions and LLM keyword extraction will be disabled."
+            )
 
         # Start audio streams
         system_capture.start()
@@ -87,13 +118,18 @@ class Pipeline:
 
         logger.info("Pipeline running. Listening...")
 
-        # Launch async tasks
         tasks = [
             asyncio.create_task(system_vad.run(), name="system_vad"),
             asyncio.create_task(mic_vad.run(), name="mic_vad"),
-            asyncio.create_task(self._merge_queues(system_speech_q, mic_speech_q, merged_speech_q), name="merge"),
+            asyncio.create_task(
+                self._merge_queues(system_speech_q, mic_speech_q, merged_speech_q),
+                name="merge",
+            ),
             asyncio.create_task(transcriber.run(), name="transcriber"),
-            asyncio.create_task(self._process_transcripts(transcript_q, ner, wiki, suggester, ollama_ok), name="processor"),
+            asyncio.create_task(
+                self._process_transcripts(transcript_q, suggester, ollama_ok),
+                name="processor",
+            ),
         ]
 
         try:
@@ -107,92 +143,103 @@ class Pipeline:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
 
-    async def _merge_queues(self, q1: asyncio.Queue, q2: asyncio.Queue, out: asyncio.Queue):
-        """Merge two speech segment queues into one."""
+    async def _merge_queues(self, q1, q2, out):
         async def forward(src):
             while True:
                 item = await src.get()
                 await out.put(item)
-
-        await asyncio.gather(
-            forward(q1),
-            forward(q2),
-        )
+        await asyncio.gather(forward(q1), forward(q2))
 
     async def _process_transcripts(
         self,
         transcript_q: asyncio.Queue,
-        ner: EntityExtractor,
-        wiki: WikiLookup,
         suggester: ResponseSuggester,
         ollama_ok: bool,
     ):
-        """Process transcript events: update state, run NER, trigger LLM."""
         while True:
             event: TranscriptEvent = await transcript_q.get()
 
             # Update transcript state
             with self._lock:
-                if event.is_partial:
-                    # Replace last partial from same source, if any
-                    if (
-                        self.state.transcripts
-                        and self.state.transcripts[-1].is_partial
-                        and self.state.transcripts[-1].source == event.source
-                    ):
-                        self.state.transcripts[-1] = event
-                    else:
-                        self.state.transcripts.append(event)
+                if (
+                    self.state.transcripts
+                    and self.state.transcripts[-1].is_partial
+                    and self.state.transcripts[-1].source == event.source
+                ):
+                    self.state.transcripts[-1] = event
                 else:
-                    # Replace last partial from same source with final
-                    if (
-                        self.state.transcripts
-                        and self.state.transcripts[-1].is_partial
-                        and self.state.transcripts[-1].source == event.source
-                    ):
-                        self.state.transcripts[-1] = event
-                    else:
-                        self.state.transcripts.append(event)
+                    self.state.transcripts.append(event)
 
-                # Trim to max
                 if len(self.state.transcripts) > self.config.ui_max_transcript_messages:
-                    self.state.transcripts = self.state.transcripts[-self.config.ui_max_transcript_messages:]
+                    self.state.transcripts = self.state.transcripts[
+                        -self.config.ui_max_transcript_messages:
+                    ]
 
-            # NER + Wikipedia (fire and forget for non-blocking)
-            asyncio.create_task(self._process_entities(event.text, ner, wiki))
+            # Keyword extraction (LLM-based, debounced)
+            if ollama_ok:
+                if self._keyword_task and not self._keyword_task.done():
+                    self._keyword_task.cancel()
+                self._keyword_task = asyncio.create_task(
+                    self._extract_keywords(event.text)
+                )
 
             # LLM suggestion: trigger on final system (opponent) speech
             if ollama_ok and event.source == "system" and not event.is_partial:
-                # Debounce: cancel previous pending LLM task
                 if self._llm_task and not self._llm_task.done():
                     self._llm_task.cancel()
                 self._llm_task = asyncio.create_task(
-                    self._generate_suggestions(suggester, event.text)
+                    self._generate_suggestions(suggester)
                 )
 
-    async def _process_entities(self, text: str, ner: EntityExtractor, wiki: WikiLookup):
-        """Extract entities and look them up on Wikipedia in parallel."""
-        terms = await ner.extract(text)
+    async def _extract_keywords(self, text: str):
+        """Extract keywords using LLM, then look up definitions."""
+        # Small debounce to avoid hammering LLM on every partial
+        await asyncio.sleep(0.5)
+
+        terms = await self._keyword_extractor.extract(text)
         if not terms:
             return
 
-        async def lookup_one(term: str):
-            definition = await wiki.lookup(term)
-            if definition:
-                with self._lock:
+        await asyncio.gather(*(self._lookup_and_add(t) for t in terms))
+
+    async def _lookup_and_add(self, term: str):
+        """Look up a term on Wikipedia, fallback to LLM explanation."""
+        definition = await self._wiki.lookup(term)
+
+        if not definition:
+            # Fallback: ask LLM to explain
+            try:
+                response = await self._ollama_client.chat(
+                    model=self.config.ollama_model,
+                    messages=[
+                        {"role": "system", "content": EXPLAIN_PROMPT},
+                        {"role": "user", "content": term},
+                    ],
+                    options={"temperature": 0.0, "num_predict": 150},
+                    think=False,
+                )
+                msg = response["message"]
+                definition = getattr(msg, "content", "") or msg.get("content", "")
+            except Exception:
+                logger.debug("LLM explain failed for: %s", term)
+                return
+
+        if definition:
+            with self._lock:
+                # Avoid duplicate terms in the entity list
+                existing = {e.term for e in self.state.entities}
+                if term not in existing:
                     self.state.entities.append(EntityEvent(
                         term=term,
-                        definition=definition,
+                        definition=definition.strip(),
                         timestamp=time.monotonic(),
                     ))
                     if len(self.state.entities) > self.config.ui_max_entity_rows:
-                        self.state.entities = self.state.entities[-self.config.ui_max_entity_rows:]
+                        self.state.entities = self.state.entities[
+                            -self.config.ui_max_entity_rows:
+                        ]
 
-        await asyncio.gather(*(lookup_one(t) for t in terms))
-
-    async def _generate_suggestions(self, suggester: ResponseSuggester, trigger_text: str):
-        """Generate LLM suggestions with debounce."""
-        # Wait for debounce period
+    async def _generate_suggestions(self, suggester: ResponseSuggester):
         await asyncio.sleep(self.config.llm_debounce_sec)
 
         with self._lock:

@@ -36,10 +36,17 @@ class GradioApp:
 
                 with gr.Column(scale=1):
                     gr.Markdown("### 📚 キーワード")
+                    with gr.Row():
+                        keyword_input = gr.Textbox(
+                            placeholder="用語を入力して調べる...",
+                            show_label=False,
+                            scale=3,
+                        )
+                        keyword_btn = gr.Button("🔍", scale=1, min_width=50)
                     keywords = gr.Dataframe(
                         headers=["用語", "説明"],
                         datatype=["str", "str"],
-                        max_height=500,
+                        max_height=450,
                         elem_classes="keyword-box",
                         interactive=False,
                     )
@@ -53,6 +60,18 @@ class GradioApp:
 
             with gr.Row():
                 status = gr.Markdown("**Status:** 起動中...")
+
+            # Manual keyword lookup
+            keyword_btn.click(
+                fn=self._add_keyword,
+                inputs=[keyword_input],
+                outputs=[keyword_input],
+            )
+            keyword_input.submit(
+                fn=self._add_keyword,
+                inputs=[keyword_input],
+                outputs=[keyword_input],
+            )
 
             # Timer-based polling
             timer = gr.Timer(value=self.pipeline.config.ui_poll_interval_sec)
@@ -73,6 +92,13 @@ class GradioApp:
             css=self._css,
             theme=self._theme,
         )
+
+    def _add_keyword(self, term: str):
+        """Add a keyword manually."""
+        term = term.strip()
+        if term:
+            self.pipeline.add_manual_keyword(term)
+        return ""  # Clear input
 
     def _poll(self):
         state = self.pipeline.get_state()
