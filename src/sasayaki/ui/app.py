@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+from datetime import datetime, timezone, timedelta
 from itertools import groupby
 
 from nicegui import ui
@@ -99,6 +100,16 @@ class NiceGuiApp:
                     ui.notify("デバイスを変更しました。再起動中...", type="info")
 
                 ui.button("適用", on_click=on_apply).props("dense")
+
+            with ui.row().classes("w-full items-center gap-4"):
+                ui.label("System:").classes("text-sm w-16")
+                system_level_bar = ui.linear_progress(
+                    value=0, show_value=False
+                ).props("color=purple").classes("w-48")
+                ui.label("Mic:").classes("text-sm w-10")
+                mic_level_bar = ui.linear_progress(
+                    value=0, show_value=False
+                ).props("color=blue").classes("w-48")
                 status_label = ui.markdown("**Status:** 起動中...")
 
             # 3-column layout
@@ -136,8 +147,27 @@ class NiceGuiApp:
                         "profile-box w-full"
                     )
 
-            # Suggestions: collapsible below the grid
-            with ui.expansion("応答候補").classes("w-full"):
+            # Suggestions: always visible below the grid
+            with ui.card().classes("w-full"):
+                ui.label("応答候補").classes("text-lg font-semibold")
+                with ui.row().classes("w-full flex-wrap gap-2"):
+                    style_buttons = {
+                        "深堀り": "indigo",
+                        "褒める": "pink",
+                        "批判的": "red",
+                        "矛盾指摘": "orange",
+                        "よいしょ": "amber",
+                        "共感": "teal",
+                        "まとめる": "blue-grey",
+                        "話題転換": "green",
+                        "具体例を求める": "cyan",
+                        "ボケる": "purple",
+                    }
+                    for style, color in style_buttons.items():
+                        ui.button(
+                            style,
+                            on_click=lambda s=style: self.pipeline.request_suggestions(s),
+                        ).props(f"color={color}")
                 suggestions_container = ui.column().classes("w-full")
 
             # Timer-based update via WebSocket push
@@ -147,14 +177,28 @@ class NiceGuiApp:
                 # Transcripts
                 transcript_container.clear()
                 with transcript_container:
+                    jst = timezone(timedelta(hours=9))
                     for t in state.transcripts:
                         css = "chat-msg chat-mic" if t.source == "mic" else "chat-msg chat-system"
                         if t.is_partial:
                             css += " chat-partial"
+                        ts = datetime.fromtimestamp(
+                            t.timestamp, tz=jst
+                        ).strftime("%H:%M:%S")
                         with ui.row().classes(
-                            "w-full justify-end" if t.source == "mic" else "w-full justify-start"
+                            "w-full items-center justify-end gap-2"
+                            if t.source == "mic"
+                            else "w-full items-center justify-start gap-2"
                         ):
+                            if t.source != "mic":
+                                ui.label(ts).classes(
+                                    "text-xs text-gray-400"
+                                )
                             ui.label(t.text).classes(css)
+                            if t.source == "mic":
+                                ui.label(ts).classes(
+                                    "text-xs text-gray-400"
+                                )
 
                 # Entities
                 if state.entities:
@@ -220,23 +264,31 @@ class NiceGuiApp:
                     if state.suggesting:
                         with ui.row().classes("items-center gap-2 loading-pulse"):
                             ui.spinner(size="sm")
-                            ui.label("応答候補を生成中").classes(
-                                "text-sm loading-dots"
-                            )
+                            ui.label(
+                                f"「{state.suggestion_style}」で応答候補を生成中"
+                            ).classes("text-sm loading-dots")
                         if state.suggestions:
                             ui.markdown("\n\n".join(
                                 f"**{i+1}.** {s}"
                                 for i, s in enumerate(state.suggestions)
                             )).classes("opacity-50")
                     elif state.suggestions:
+                        if state.suggestion_style:
+                            ui.label(
+                                f"スタイル: {state.suggestion_style}"
+                            ).classes("text-sm text-gray-500")
                         ui.markdown("\n\n".join(
                             f"**{i+1}.** {s}"
                             for i, s in enumerate(state.suggestions)
                         ))
                     else:
-                        ui.label("相手の発話を待っています...").classes(
-                            "text-gray-400 italic"
-                        )
+                        ui.label(
+                            "スタイルを選んでボタンを押してください"
+                        ).classes("text-gray-400 italic")
+
+                # Audio levels
+                system_level_bar.set_value(state.system_level)
+                mic_level_bar.set_value(state.mic_level)
 
                 # Status
                 if state.error:

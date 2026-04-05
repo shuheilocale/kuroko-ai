@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 
@@ -10,15 +9,27 @@ from sasayaki.types import TranscriptEvent
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-あなたはビジネス会議における非常に優秀なアシスタント「ささやき女将」です。
-以下の【会議の文脈】を踏まえ、ユーザー（自分）が次に発言すべき最適な返答の選択肢を3つ提示してください。
-選択肢は簡潔な口語体（です・ます調）で、そのまま読み上げられる形にしてください。
+あなたは会話アシスタント「ささやき女将」です。
+以下の【会話の文脈】を踏まえ、ユーザー（自分）が次に発言すべき返答を3つ提示してください。
+選択肢は簡潔な口語体で、そのまま読み上げられる形にしてください。
 
-1. 相手の意見に同意し、前向きに議論を進める返答
-2. 相手の意見に対する鋭い質問や、深掘りをする返答
-3. 情報を整理し、一旦保留または持ち帰る返答
+【応答スタイル】
+{style_instruction}
 
 各選択肢は番号付きで出力してください。余計な説明は不要です。"""
+
+RESPONSE_STYLES = {
+    "深堀り": "相手の発言の核心に迫る質問や、具体的な詳細を引き出す深堀り質問をする",
+    "褒める": "相手の発言や考え方の良い点を具体的に褒め、ポジティブなフィードバックを返す",
+    "批判的": "相手の発言の論理的な弱点やリスクを冷静に指摘し、建設的な反論を提示する",
+    "矛盾指摘": "相手の発言内の矛盾点や、以前の発言との食い違いを丁寧に指摘する",
+    "よいしょ": "相手を持ち上げつつ、気持ちよく話を続けてもらえるような相槌や賞賛を返す",
+    "共感": "相手の感情や立場に寄り添い、理解と共感を示す温かい返答をする",
+    "まとめる": "ここまでの議論を整理し、要点をまとめて確認する返答をする",
+    "話題転換": "自然な流れで別の切り口や新しいトピックに話を展開する返答をする",
+    "具体例を求める": "相手の主張を裏付ける具体的な事例やデータを求める質問をする",
+    "ボケる": "場の空気を和ませるユーモアや、あえてとぼけた返答で笑いを誘う",
+}
 
 
 class ResponseSuggester:
@@ -29,20 +40,23 @@ class ResponseSuggester:
         self._client = ollama.AsyncClient()
 
     async def suggest(
-        self, transcripts: list[TranscriptEvent]
+        self, transcripts: list[TranscriptEvent], style: str = "深堀り"
     ) -> list[str]:
-        """Generate 3 suggestions based on recent conversation context."""
+        """Generate 3 suggestions based on recent conversation context and style."""
         if not transcripts:
             return []
 
+        style_instruction = RESPONSE_STYLES.get(style, RESPONSE_STYLES["深堀り"])
+        system_prompt = SYSTEM_PROMPT.format(style_instruction=style_instruction)
+
         context = self._build_context(transcripts)
-        prompt = f"【会議の文脈】\n{context}"
+        prompt = f"【会話の文脈】\n{context}"
 
         try:
             response = await self._client.chat(
                 model=self.config.ollama_model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 options={"temperature": 0.7, "num_predict": 512},

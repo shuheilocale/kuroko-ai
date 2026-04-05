@@ -34,6 +34,8 @@ class Pipeline:
         self._profile_processed_idx: int = 0
         self._tasks: list[asyncio.Task] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._system_capture: AudioCapture | None = None
+        self._mic_capture: AudioCapture | None = None
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -42,6 +44,7 @@ class Pipeline:
                 entities=list(self.state.entities),
                 suggestions=list(self.state.suggestions),
                 suggesting=self.state.suggesting,
+                suggestion_style=self.state.suggestion_style,
                 profile=PartnerProfile(
                     name=self.state.profile.name,
                     facts=list(self.state.profile.facts),
@@ -53,12 +56,23 @@ class Pipeline:
                 system_device=self.state.system_device,
                 mic_device=self.state.mic_device,
                 ollama_ok=self.state.ollama_ok,
+                system_level=self._system_capture.level if self._system_capture else 0.0,
+                mic_level=self._mic_capture.level if self._mic_capture else 0.0,
             )
 
     def add_manual_keyword(self, term: str):
         """Add a keyword manually from the UI."""
         asyncio.run_coroutine_threadsafe(
             self._lookup_and_add(term),
+            self._loop,
+        )
+
+    def request_suggestions(self, style: str):
+        """Request suggestion generation with a specific style. Called from UI."""
+        if self._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._generate_suggestions_styled(style),
             self._loop,
         )
 
@@ -93,11 +107,11 @@ class Pipeline:
 
         # Audio capture
         try:
-            system_capture = AudioCapture(
+            self._system_capture = AudioCapture(
                 config=self.config, source="system",
                 queue=system_audio_q, loop=self._loop,
             )
-            mic_capture = AudioCapture(
+            self._mic_capture = AudioCapture(
                 config=self.config, source="mic",
                 queue=mic_audio_q, loop=self._loop,
             )
@@ -129,10 +143,10 @@ class Pipeline:
         self._wiki = WikiLookup(config=self.config)
         self._ollama_client = ollama.AsyncClient()
         self._profiler = ProfileExtractor(config=self.config)
-        suggester = ResponseSuggester(config=self.config)
+        self._suggester = ResponseSuggester(config=self.config)
 
         # Check Ollama
-        ollama_ok = await suggester.health_check()
+        ollama_ok = await self._suggester.health_check()
         if not ollama_ok:
             logger.warning(
                 "Ollama not available or model not found. "
@@ -140,12 +154,12 @@ class Pipeline:
             )
 
         # Start audio streams
-        system_capture.start()
-        mic_capture.start()
+        self._system_capture.start()
+        self._mic_capture.start()
         with self._lock:
             self.state.is_running = True
-            self.state.system_device = system_capture.resolved_device_name
-            self.state.mic_device = mic_capture.resolved_device_name
+            self.state.system_device = self._system_capture.resolved_device_name
+            self.state.mic_device = self._mic_capture.resolved_device_name
             self.state.ollama_ok = ollama_ok
 
         logger.info("Pipeline running. Listening...")
@@ -159,7 +173,7 @@ class Pipeline:
             ),
             asyncio.create_task(transcriber.run(), name="transcriber"),
             asyncio.create_task(
-                self._process_transcripts(transcript_q, suggester, ollama_ok),
+                self._process_transcripts(transcript_q, ollama_ok),
                 name="processor",
             ),
         ]
@@ -169,8 +183,8 @@ class Pipeline:
         except asyncio.CancelledError:
             pass
         finally:
-            system_capture.stop()
-            mic_capture.stop()
+            self._system_capture.stop()
+            self._mic_capture.stop()
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
@@ -185,7 +199,6 @@ class Pipeline:
     async def _process_transcripts(
         self,
         transcript_q: asyncio.Queue,
-        suggester: ResponseSuggester,
         ollama_ok: bool,
     ):
         while True:
@@ -223,14 +236,6 @@ class Pipeline:
                     self._keyword_task = asyncio.create_task(
                         self._extract_keywords(new_text)
                     )
-
-            # LLM suggestion: trigger on final system (opponent) speech
-            if ollama_ok and event.source == "system" and not event.is_partial:
-                if self._llm_task and not self._llm_task.done():
-                    self._llm_task.cancel()
-                self._llm_task = asyncio.create_task(
-                    self._generate_suggestions(suggester)
-                )
 
             # Profile extraction: trigger on final system speech
             if ollama_ok and event.source == "system" and not event.is_partial:
@@ -365,18 +370,21 @@ class Pipeline:
                         e.loading = False
                         break
 
-    async def _generate_suggestions(self, suggester: ResponseSuggester):
-        await asyncio.sleep(self.config.llm_debounce_sec)
+    async def _generate_suggestions_styled(self, style: str):
+        if self._llm_task and not self._llm_task.done():
+            self._llm_task.cancel()
 
         with self._lock:
             self.state.suggesting = True
+            self.state.suggestion_style = style
             transcripts = list(self.state.transcripts)
 
         try:
-            suggestions = await suggester.suggest(transcripts)
+            suggestions = await self._suggester.suggest(transcripts, style)
             if suggestions:
                 with self._lock:
                     self.state.suggestions = suggestions
+                    self.state.suggestion_style = style
         finally:
             with self._lock:
                 self.state.suggesting = False

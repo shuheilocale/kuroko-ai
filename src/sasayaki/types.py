@@ -59,6 +59,7 @@ class PipelineState:
     entities: list[EntityEvent] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
     suggesting: bool = False
+    suggestion_style: str = ""
     profile: PartnerProfile = field(default_factory=PartnerProfile)
     profiling: bool = False
     is_running: bool = False
@@ -66,3 +67,5 @@ class PipelineState:
     system_device: str = ""
     mic_device: str = ""
     ollama_ok: bool = False
+    system_level: float = 0.0
+    mic_level: float = 0.0

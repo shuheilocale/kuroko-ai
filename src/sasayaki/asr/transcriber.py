@@ -80,7 +80,7 @@ class Transcriber:
                 text=text,
                 source=segment.source,
                 is_partial=segment.is_partial,
-                timestamp=time.monotonic(),
+                timestamp=time.time(),
             )
             await self.output_queue.put(event)
             logger.info(

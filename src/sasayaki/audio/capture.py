@@ -59,12 +59,16 @@ class AudioCapture:
 
         self.stream: sd.InputStream | None = None
         self.resolved_device_name: str = ""
+        self.level: float = 0.0  # RMS audio level (0.0 - 1.0)
 
     def _callback(self, indata: np.ndarray, frames: int, time_info, status):
         if status:
             logger.warning("Audio callback status: %s", status)
         # Convert to mono float32, copy to avoid buffer reuse
         audio = indata[:, 0].copy().astype(np.float32)
+        # Update RMS level (clamped to 0.0 - 1.0)
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        self.level = min(rms * 5.0, 1.0)  # Scale up for visibility
         try:
             self.loop.call_soon_threadsafe(self.queue.put_nowait, audio)
         except asyncio.QueueFull:
