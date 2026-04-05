@@ -1,14 +1,18 @@
 import asyncio
 import logging
+import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone, timedelta
 from itertools import groupby
+from pathlib import Path
 
 from nicegui import ui
 
 from sasayaki.audio.capture import list_input_devices
 from sasayaki.config import Config
 from sasayaki.pipeline.orchestrator import Pipeline
+from sasayaki.vision.screen_capture import ScreenCapture
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,11 @@ class NiceGuiApp:
 
             # Device selectors + status
             devices = list_input_devices()
+            monitors = ScreenCapture.list_monitors()
+            monitor_options = {
+                m["index"]: f"Monitor {m['index']} ({m['width']}x{m['height']})"
+                for m in monitors
+            }
 
             with ui.row().classes("w-full items-center gap-4"):
                 system_select = ui.select(
@@ -92,14 +101,74 @@ class NiceGuiApp:
                     value=self.config.mic_device,
                     label="Mic",
                 ).classes("w-48")
+                monitor_select = ui.select(
+                    monitor_options,
+                    value=1,
+                    label="Screen Capture",
+                ).classes("w-56")
 
                 def on_apply():
                     self.config.system_audio_device = system_select.value
                     self.config.mic_device = mic_select.value
+                    self.config.screen_monitor = monitor_select.value
                     self._restart_pipeline()
-                    ui.notify("デバイスを変更しました。再起動中...", type="info")
+                    ui.notify(
+                        "設定を適用しました。再起動中...",
+                        type="info",
+                    )
 
                 ui.button("適用", on_click=on_apply).props("dense")
+
+            with ui.row().classes("w-full items-center gap-2"):
+                region_label = ui.label(
+                    "キャプチャ範囲: 全画面"
+                ).classes("text-sm")
+
+                async def select_region():
+                    region_label.set_text(
+                        "キャプチャ範囲: 選択中..."
+                    )
+                    result = await self._select_screen_region()
+                    if result:
+                        x, y, w, h = result
+                        if self.pipeline._screen_capture:
+                            self.pipeline._screen_capture.region = (
+                                x, y, w, h
+                            )
+                        region_label.set_text(
+                            f"キャプチャ範囲: "
+                            f"{w}x{h} ({x},{y})"
+                        )
+                        ui.notify(
+                            f"範囲設定: {w}x{h}",
+                            type="positive",
+                        )
+                    else:
+                        region_label.set_text(
+                            "キャプチャ範囲: 全画面"
+                        )
+                        ui.notify(
+                            "範囲選択がキャンセルされました",
+                            type="warning",
+                        )
+
+                ui.button(
+                    "範囲選択", on_click=select_region
+                ).props("dense")
+
+                def reset_region():
+                    if self.pipeline._screen_capture:
+                        self.pipeline._screen_capture.region = (
+                            0, 0, 0, 0
+                        )
+                    region_label.set_text(
+                        "キャプチャ範囲: 全画面"
+                    )
+                    ui.notify("全画面に戻しました", type="info")
+
+                ui.button(
+                    "全画面に戻す", on_click=reset_region
+                ).props("dense flat")
 
             with ui.row().classes("w-full items-center gap-4"):
                 ui.label("System:").classes("text-sm w-16")
@@ -147,6 +216,53 @@ class NiceGuiApp:
                         "profile-box w-full"
                     )
 
+            # Face analysis
+            with ui.card().classes("w-full"):
+                ui.label("表情分析").classes("text-lg font-semibold")
+                with ui.row().classes("w-full gap-8 items-start"):
+                    # Emotion meters
+                    with ui.column().classes("gap-1"):
+                        EMOTION_LABELS = {
+                            "joy": ("喜び", "amber"),
+                            "surprise": ("驚き", "cyan"),
+                            "concern": ("困惑", "red"),
+                            "neutral": ("平常", "grey"),
+                        }
+                        emotion_bars = {}
+                        for key, (label, color) in EMOTION_LABELS.items():
+                            with ui.row().classes("items-center gap-2"):
+                                ui.label(label).classes("text-sm w-10")
+                                bar = ui.linear_progress(
+                                    value=0, show_value=False
+                                ).props(
+                                    f"color={color}"
+                                ).classes("w-32")
+                                emotion_bars[key] = bar
+                    # Face thumbnail + status
+                    with ui.column().classes("gap-2 items-center"):
+                        face_image_html = ui.html(
+                            '<div style="width:96px;height:96px;'
+                            'background:#eee;border-radius:8px">'
+                            '</div>'
+                        )
+                        face_status_label = ui.label(
+                            "顔未検出"
+                        ).classes("text-sm text-gray-400")
+                        nod_label = ui.label(
+                            "うなずき: 0回"
+                        ).classes("text-sm")
+                        fps_label = ui.label(
+                            "FPS: --"
+                        ).classes("text-xs text-gray-400")
+                    # Expression change log
+                    with ui.column().classes("flex-grow"):
+                        ui.label("表情変化ログ").classes(
+                            "text-sm font-semibold"
+                        )
+                        expression_log = ui.column().classes(
+                            "max-h-24 overflow-y-auto"
+                        )
+
             # Suggestions: always visible below the grid
             with ui.card().classes("w-full"):
                 ui.label("応答候補").classes("text-lg font-semibold")
@@ -171,13 +287,14 @@ class NiceGuiApp:
                 suggestions_container = ui.column().classes("w-full")
 
             # Timer-based update via WebSocket push
+            jst = timezone(timedelta(hours=9))
+
             def poll():
                 state = self.pipeline.get_state()
 
                 # Transcripts
                 transcript_container.clear()
                 with transcript_container:
-                    jst = timezone(timedelta(hours=9))
                     for t in state.transcripts:
                         css = "chat-msg chat-mic" if t.source == "mic" else "chat-msg chat-system"
                         if t.is_partial:
@@ -290,6 +407,64 @@ class NiceGuiApp:
                 system_level_bar.set_value(state.system_level)
                 mic_level_bar.set_value(state.mic_level)
 
+                # Face analysis
+                face = state.face
+                emotion_bars["joy"].set_value(face.joy)
+                emotion_bars["surprise"].set_value(face.surprise)
+                emotion_bars["concern"].set_value(face.concern)
+                emotion_bars["neutral"].set_value(face.neutral)
+                fps_label.set_text(f"FPS: {face.fps:.1f}")
+                if face.detected:
+                    DOMINANT_JP = {
+                        "joy": "喜び",
+                        "surprise": "驚き",
+                        "concern": "困惑",
+                        "neutral": "平常",
+                    }
+                    dominant = DOMINANT_JP.get(
+                        face.dominant_emotion,
+                        face.dominant_emotion,
+                    )
+                    face_status_label.set_text(
+                        f"検出中 — {dominant}"
+                    )
+                    face_status_label.classes(
+                        remove="text-gray-400",
+                        add="text-green-600",
+                    )
+                    if face.face_image_base64:
+                        face_image_html.set_content(
+                            f'<img src="data:image/jpeg;base64,'
+                            f'{face.face_image_base64}" '
+                            f'style="width:96px;height:96px;'
+                            f'object-fit:cover;border-radius:8px">'
+                        )
+                else:
+                    face_status_label.set_text("顔未検出")
+                    face_status_label.classes(
+                        remove="text-green-600",
+                        add="text-gray-400",
+                    )
+                    face_image_html.set_content(
+                        '<div style="width:96px;height:96px;'
+                        'background:#eee;border-radius:8px">'
+                        '</div>'
+                    )
+                nod_label.set_text(f"うなずき: {face.nod_count}回")
+                expression_log.clear()
+                with expression_log:
+                    for evt in reversed(
+                        face.expression_changes[-10:]
+                    ):
+                        ts = datetime.fromtimestamp(
+                            evt.timestamp, tz=jst
+                        ).strftime("%H:%M:%S")
+                        ui.label(
+                            f"{ts} {evt.detail}"
+                            + (f" ({evt.transcript_snippet}...)"
+                               if evt.transcript_snippet else "")
+                        ).classes("text-xs")
+
                 # Status
                 if state.error:
                     status_label.set_content(
@@ -317,6 +492,75 @@ class NiceGuiApp:
             title="ささやき女将 - AI Meeting Assistant",
             reload=False,
         )
+
+    async def _select_screen_region(
+        self,
+    ) -> tuple[int, int, int, int] | None:
+        """Use macOS native screenshot selection to pick a region.
+
+        Returns (x, y, w, h) in screen coordinates, or None.
+        """
+        loop = asyncio.get_event_loop()
+
+        def _select():
+            import cv2
+
+            sc = self.pipeline._screen_capture
+            if not sc:
+                return None
+            mon_w, mon_h = sc.get_monitor_size()
+
+            tmp_sel = tempfile.mktemp(suffix=".png")
+            tmp_full = tempfile.mktemp(suffix=".png")
+            try:
+                # 1) Capture full screen (silent, no sound)
+                subprocess.run(
+                    ["screencapture", "-x", tmp_full],
+                    timeout=10,
+                )
+                # 2) Interactive region selection
+                ret = subprocess.run(
+                    ["screencapture", "-i", "-s", tmp_sel],
+                    timeout=60,
+                )
+                if ret.returncode != 0:
+                    return None
+                p = Path(tmp_sel)
+                if not p.exists() or p.stat().st_size == 0:
+                    return None
+
+                sel = cv2.imread(tmp_sel)
+                full = cv2.imread(tmp_full)
+                if sel is None or full is None:
+                    return None
+
+                sh, sw = sel.shape[:2]
+
+                # Retina scale detection
+                scale = 1
+                if full.shape[1] > mon_w * 1.5:
+                    scale = 2
+
+                # Template match to find position
+                res = cv2.matchTemplate(
+                    full, sel, cv2.TM_CCOEFF_NORMED
+                )
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                if max_val > 0.7:
+                    mx, my = max_loc
+                    return (
+                        mx // scale,
+                        my // scale,
+                        sw // scale,
+                        sh // scale,
+                    )
+                return (0, 0, sw // scale, sh // scale)
+            finally:
+                Path(tmp_sel).unlink(missing_ok=True)
+                Path(tmp_full).unlink(missing_ok=True)
+
+        return await loop.run_in_executor(None, _select)
 
     def _add_keyword(self, input_element) -> None:
         term = input_element.value.strip()

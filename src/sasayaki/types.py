@@ -52,6 +52,32 @@ class PartnerProfile:
 
 
 @dataclass
+class ExpressionChangeEvent:
+    """Records a moment when the partner's expression changed."""
+    detail: str
+    transcript_snippet: str
+    timestamp: float
+
+
+@dataclass
+class FaceAnalysisState:
+    """Face analysis results for the UI."""
+    detected: bool = False
+    joy: float = 0.0
+    surprise: float = 0.0
+    concern: float = 0.0
+    neutral: float = 1.0
+    dominant_emotion: str = "neutral"
+    nodding: bool = False
+    nod_count: int = 0
+    expression_changes: list[ExpressionChangeEvent] = field(
+        default_factory=list
+    )
+    fps: float = 0.0
+    face_image_base64: str = ""
+
+
+@dataclass
 class PipelineState:
     """Shared mutable state polled by the UI."""
 
@@ -69,3 +95,4 @@ class PipelineState:
     ollama_ok: bool = False
     system_level: float = 0.0
     mic_level: float = 0.0
+    face: FaceAnalysisState = field(default_factory=FaceAnalysisState)

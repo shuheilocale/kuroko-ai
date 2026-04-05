@@ -45,6 +45,9 @@ class Config:
     llm_context_turns: int = 5
     llm_debounce_sec: float = 1.5
 
+    # Vision
+    screen_monitor: int = 1
+
     # Profile
     profile_max_facts: int = 50
     profile_summary_interval: int = 5

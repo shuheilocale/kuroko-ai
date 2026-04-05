@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import logging
 import threading
 import time
 
+import cv2
 import ollama
 
 from sasayaki.asr.transcriber import Transcriber
@@ -13,7 +15,12 @@ from sasayaki.llm.profiler import ProfileExtractor
 from sasayaki.llm.suggester import ResponseSuggester
 from sasayaki.nlp.keyword_extractor import KeywordExtractor
 from sasayaki.nlp.wiki import WikiLookup
-from sasayaki.types import EntityEvent, PartnerProfile, PipelineState, TranscriptEvent
+from sasayaki.types import (
+    EntityEvent, ExpressionChangeEvent, FaceAnalysisState,
+    PartnerProfile, PipelineState, TranscriptEvent,
+)
+from sasayaki.vision.face_analyzer import FaceAnalyzer
+from sasayaki.vision.screen_capture import ScreenCapture
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +43,8 @@ class Pipeline:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._system_capture: AudioCapture | None = None
         self._mic_capture: AudioCapture | None = None
+        self._face_analyzer: FaceAnalyzer | None = None
+        self._screen_capture: ScreenCapture | None = None
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -58,6 +67,25 @@ class Pipeline:
                 ollama_ok=self.state.ollama_ok,
                 system_level=self._system_capture.level if self._system_capture else 0.0,
                 mic_level=self._mic_capture.level if self._mic_capture else 0.0,
+                face=FaceAnalysisState(
+                    detected=self.state.face.detected,
+                    joy=self.state.face.joy,
+                    surprise=self.state.face.surprise,
+                    concern=self.state.face.concern,
+                    neutral=self.state.face.neutral,
+                    dominant_emotion=(
+                        self.state.face.dominant_emotion
+                    ),
+                    nodding=self.state.face.nodding,
+                    nod_count=self.state.face.nod_count,
+                    expression_changes=list(
+                        self.state.face.expression_changes
+                    ),
+                    fps=self.state.face.fps,
+                    face_image_base64=(
+                        self.state.face.face_image_base64
+                    ),
+                ),
             )
 
     def add_manual_keyword(self, term: str):
@@ -153,6 +181,12 @@ class Pipeline:
                 "Suggestions and LLM keyword extraction will be disabled."
             )
 
+        # Face analysis
+        self._face_analyzer = FaceAnalyzer()
+        self._screen_capture = ScreenCapture(
+            monitor=self.config.screen_monitor, fps=10.0
+        )
+
         # Start audio streams
         self._system_capture.start()
         self._mic_capture.start()
@@ -176,6 +210,10 @@ class Pipeline:
                 self._process_transcripts(transcript_q, ollama_ok),
                 name="processor",
             ),
+            asyncio.create_task(
+                self._face_analysis_loop(),
+                name="face_analysis",
+            ),
         ]
 
         try:
@@ -185,6 +223,10 @@ class Pipeline:
         finally:
             self._system_capture.stop()
             self._mic_capture.stop()
+            if self._face_analyzer:
+                self._face_analyzer.close()
+            if self._screen_capture:
+                self._screen_capture.close()
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
@@ -243,6 +285,118 @@ class Pipeline:
                     self._profile_task = asyncio.create_task(
                         self._extract_profile()
                     )
+
+    async def _face_analysis_loop(self):
+        """Periodically capture screen and analyze faces."""
+        logger.info("Face analysis loop started")
+        loop = asyncio.get_event_loop()
+        frame_count = 0
+        last_fps_time = time.monotonic()
+        fps_frame_count = 0
+        current_fps = 0.0
+        while True:
+            try:
+                frame = await loop.run_in_executor(
+                    None, self._screen_capture.grab
+                )
+                if frame is None:
+                    await asyncio.sleep(0.1)
+                    continue
+                frame_count += 1
+                fps_frame_count += 1
+                face_state = await loop.run_in_executor(
+                    None, self._face_analyzer.analyze, frame
+                )
+
+                # Calculate FPS every 5 frames
+                now = time.monotonic()
+                elapsed = now - last_fps_time
+                if elapsed >= 2.0:
+                    current_fps = fps_frame_count / elapsed
+                    fps_frame_count = 0
+                    last_fps_time = now
+
+                if frame_count % 10 == 1:
+                    logger.info(
+                        "Face analysis #%d: detected=%s, "
+                        "fps=%.1f",
+                        frame_count,
+                        face_state.detected,
+                        current_fps,
+                    )
+
+                # Convert face crop to base64
+                face_b64 = ""
+                if (face_state.detected
+                        and face_state.face_crop is not None):
+                    bgr = cv2.cvtColor(
+                        face_state.face_crop, cv2.COLOR_RGB2BGR
+                    )
+                    _, buf = cv2.imencode(".jpg", bgr)
+                    face_b64 = base64.b64encode(
+                        buf.tobytes()
+                    ).decode()
+
+                with self._lock:
+                    self.state.face.detected = face_state.detected
+                    self.state.face.fps = current_fps
+                    self.state.face.face_image_base64 = face_b64
+                    if face_state.detected:
+                        self.state.face.joy = (
+                            face_state.emotions.joy
+                        )
+                        self.state.face.surprise = (
+                            face_state.emotions.surprise
+                        )
+                        self.state.face.concern = (
+                            face_state.emotions.concern
+                        )
+                        self.state.face.neutral = (
+                            face_state.emotions.neutral
+                        )
+                        self.state.face.dominant_emotion = (
+                            face_state.emotions.dominant
+                        )
+                        self.state.face.nodding = (
+                            face_state.nodding
+                        )
+                        self.state.face.nod_count = (
+                            face_state.nod_count
+                        )
+
+                        if face_state.expression_changed:
+                            snippet = ""
+                            if self.state.transcripts:
+                                snippet = (
+                                    self.state.transcripts[-1]
+                                    .text[:50]
+                                )
+                            self.state.face.expression_changes\
+                                .append(
+                                    ExpressionChangeEvent(
+                                        detail=(
+                                            face_state
+                                            .expression_change_detail
+                                        ),
+                                        transcript_snippet=snippet,
+                                        timestamp=time.time(),
+                                    )
+                                )
+                            if len(
+                                self.state.face
+                                .expression_changes
+                            ) > 20:
+                                self.state.face\
+                                    .expression_changes = (
+                                        self.state.face
+                                        .expression_changes[-20:]
+                                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug(
+                    "Face analysis frame error", exc_info=True
+                )
 
     async def _extract_keywords(self, text: str):
         """Extract keywords using LLM, then look up definitions."""
