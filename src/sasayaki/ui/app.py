@@ -43,12 +43,9 @@ class GradioApp:
                             scale=3,
                         )
                         keyword_btn = gr.Button("🔍", scale=1, min_width=50)
-                    keywords = gr.Dataframe(
-                        headers=["用語", "説明"],
-                        datatype=["str", "str"],
-                        max_height=450,
+                    keywords = gr.Markdown(
+                        value="*キーワードを検出中...*",
                         elem_classes="keyword-box",
-                        interactive=False,
                     )
 
                 with gr.Column(scale=1):
@@ -112,8 +109,14 @@ class GradioApp:
                 text = f"*{text}*"  # Italic for partial
             messages.append({"role": role, "content": text})
 
-        # Entities -> Dataframe
-        entity_data = [[e.term, e.definition] for e in state.entities]
+        # Entities -> Markdown
+        if state.entities:
+            entity_lines = []
+            for e in state.entities:
+                entity_lines.append(f"**{e.term}**\n{e.definition}")
+            entity_data = "\n\n---\n\n".join(entity_lines)
+        else:
+            entity_data = "*キーワードを検出中...*"
 
         # Suggestions -> Markdown
         if state.suggestions:
