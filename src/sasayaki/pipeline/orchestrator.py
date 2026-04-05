@@ -28,6 +28,7 @@ class Pipeline:
         self._lock = threading.Lock()
         self._llm_task: asyncio.Task | None = None
         self._keyword_task: asyncio.Task | None = None
+        self._keyword_processed_texts: list[str] = []
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -176,13 +177,21 @@ class Pipeline:
                     ]
 
             # Keyword extraction (LLM-based)
-            # Don't cancel running extraction - let it finish, skip if busy
+            # Collect all transcript text, extract from unprocessed portion
             if ollama_ok and (
                 self._keyword_task is None or self._keyword_task.done()
             ):
-                self._keyword_task = asyncio.create_task(
-                    self._extract_keywords(event.text)
-                )
+                with self._lock:
+                    all_texts = [t.text for t in self.state.transcripts]
+                full_text = "\n".join(all_texts)
+                processed = "\n".join(self._keyword_processed_texts)
+                # Only extract if there's meaningful new text
+                new_text = full_text[len(processed):].strip()
+                if len(new_text) >= 20:
+                    self._keyword_processed_texts = list(all_texts)
+                    self._keyword_task = asyncio.create_task(
+                        self._extract_keywords(new_text)
+                    )
 
             # LLM suggestion: trigger on final system (opponent) speech
             if ollama_ok and event.source == "system" and not event.is_partial:
