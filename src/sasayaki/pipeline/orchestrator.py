@@ -175,10 +175,11 @@ class Pipeline:
                         -self.config.ui_max_transcript_messages:
                     ]
 
-            # Keyword extraction (LLM-based, debounced)
-            if ollama_ok:
-                if self._keyword_task and not self._keyword_task.done():
-                    self._keyword_task.cancel()
+            # Keyword extraction (LLM-based)
+            # Don't cancel running extraction - let it finish, skip if busy
+            if ollama_ok and (
+                self._keyword_task is None or self._keyword_task.done()
+            ):
                 self._keyword_task = asyncio.create_task(
                     self._extract_keywords(event.text)
                 )
@@ -193,9 +194,6 @@ class Pipeline:
 
     async def _extract_keywords(self, text: str):
         """Extract keywords using LLM, then look up definitions."""
-        # Small debounce to avoid hammering LLM on every partial
-        await asyncio.sleep(0.5)
-
         terms = await self._keyword_extractor.extract(text)
         if not terms:
             return
