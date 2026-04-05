@@ -55,7 +55,7 @@ class GradioApp:
                 status = gr.Markdown("**Status:** 起動中...")
 
             # Timer-based polling
-            timer = gr.Timer(value=0.5)
+            timer = gr.Timer(value=self.pipeline.config.ui_poll_interval_sec)
             timer.tick(
                 fn=self._poll,
                 outputs=[chatbot, keywords, suggestions, status],
