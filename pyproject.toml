@@ -14,7 +14,7 @@ dependencies = [
     "ja-ginza>=5.2",
     "ollama>=0.4",
     "wikipedia-api>=0.7",
-    "gradio>=5.0",
+    "nicegui>=2.0",
     "soundfile>=0.12",
 ]
 

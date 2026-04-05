@@ -25,6 +25,7 @@ class EntityEvent:
     term: str
     definition: str
     timestamp: float
+    loading: bool = False
 
 
 @dataclass
@@ -41,6 +42,7 @@ class PipelineState:
     transcripts: list[TranscriptEvent] = field(default_factory=list)
     entities: list[EntityEvent] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
+    suggesting: bool = False
     is_running: bool = False
     error: str | None = None
     system_device: str = ""

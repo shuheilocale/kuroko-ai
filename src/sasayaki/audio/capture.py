@@ -10,6 +10,16 @@ from sasayaki.config import Config
 logger = logging.getLogger(__name__)
 
 
+def list_input_devices() -> list[str]:
+    """Return names of all available audio input devices."""
+    devices = sd.query_devices()
+    return [
+        dev["name"]
+        for dev in devices
+        if dev["max_input_channels"] > 0
+    ]
+
+
 def find_device_index(name: str) -> int | None:
     """Find audio device index by partial name match."""
     devices = sd.query_devices()

@@ -12,7 +12,7 @@ class Config:
     vad_threshold: float = 0.5
     vad_min_silence_ms: int = 700
     vad_speech_pad_ms: int = 300
-    vad_partial_flush_sec: float = 5.0
+    vad_partial_flush_sec: float = 1.5
 
     # ASR
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
@@ -46,6 +46,5 @@ class Config:
     llm_debounce_sec: float = 1.5
 
     # UI
-    ui_poll_interval_sec: float = 0.5
     ui_max_transcript_messages: int = 100
     ui_max_entity_rows: int = 50

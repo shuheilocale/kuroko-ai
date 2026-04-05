@@ -1,11 +1,8 @@
-import asyncio
 import logging
 import sys
-import threading
 
 from sasayaki.config import Config
-from sasayaki.pipeline.orchestrator import Pipeline
-from sasayaki.ui.app import GradioApp
+from sasayaki.ui.app import NiceGuiApp
 
 
 def main():
@@ -23,22 +20,9 @@ def main():
     logger.info("Whisper model: %s", config.whisper_model)
     logger.info("Ollama model: %s", config.ollama_model)
 
-    pipeline = Pipeline(config)
-    ui = GradioApp(pipeline)
-    app = ui.build()
-
-    # Run pipeline in a background daemon thread
-    loop = asyncio.new_event_loop()
-
-    def run_pipeline():
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(pipeline.run())
-
-    pipeline_thread = threading.Thread(target=run_pipeline, daemon=True)
-    pipeline_thread.start()
-
-    # Launch Gradio on main thread
-    ui.launch(app)
+    app = NiceGuiApp(config)
+    app.build()
+    app.launch()
 
 
 if __name__ == "__main__":

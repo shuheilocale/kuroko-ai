@@ -46,12 +46,14 @@ class ResponseSuggester:
                     {"role": "user", "content": prompt},
                 ],
                 options={"temperature": 0.7, "num_predict": 512},
+                think=False,
             )
         except Exception:
             logger.exception("Ollama request failed")
             return []
 
-        text = response["message"]["content"]
+        msg = response["message"]
+        text = getattr(msg, "content", "") or msg.get("content", "")
         return self._parse_suggestions(text)
 
     def _build_context(self, transcripts: list[TranscriptEvent]) -> str:
