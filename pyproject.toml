@@ -16,6 +16,9 @@ dependencies = [
     "wikipedia-api>=0.7",
     "nicegui>=2.0",
     "soundfile>=0.12",
+    "mediapipe>=0.10",
+    "mss>=9.0",
+    "opencv-python-headless>=4.8",
 ]
 
 [project.optional-dependencies]
