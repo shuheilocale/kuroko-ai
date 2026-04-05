@@ -171,20 +171,24 @@ class Pipeline:
                 )
 
     async def _process_entities(self, text: str, ner: EntityExtractor, wiki: WikiLookup):
-        """Extract entities and look them up on Wikipedia."""
+        """Extract entities and look them up on Wikipedia in parallel."""
         terms = await ner.extract(text)
-        for term in terms:
+        if not terms:
+            return
+
+        async def lookup_one(term: str):
             definition = await wiki.lookup(term)
             if definition:
-                entity = EntityEvent(
-                    term=term,
-                    definition=definition,
-                    timestamp=time.monotonic(),
-                )
                 with self._lock:
-                    self.state.entities.append(entity)
+                    self.state.entities.append(EntityEvent(
+                        term=term,
+                        definition=definition,
+                        timestamp=time.monotonic(),
+                    ))
                     if len(self.state.entities) > self.config.ui_max_entity_rows:
                         self.state.entities = self.state.entities[-self.config.ui_max_entity_rows:]
+
+        await asyncio.gather(*(lookup_one(t) for t in terms))
 
     async def _generate_suggestions(self, suggester: ResponseSuggester, trigger_text: str):
         """Generate LLM suggestions with debounce."""
