@@ -36,6 +36,22 @@ class SuggestionEvent:
 
 
 @dataclass
+class ProfileFact:
+    """A single discovered fact about the conversation partner."""
+    category: str
+    content: str
+    timestamp: float
+
+
+@dataclass
+class PartnerProfile:
+    """Dynamically built profile of the conversation partner."""
+    name: str | None = None
+    facts: list[ProfileFact] = field(default_factory=list)
+    summary: str = ""
+
+
+@dataclass
 class PipelineState:
     """Shared mutable state polled by the UI."""
 
@@ -43,6 +59,8 @@ class PipelineState:
     entities: list[EntityEvent] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
     suggesting: bool = False
+    profile: PartnerProfile = field(default_factory=PartnerProfile)
+    profiling: bool = False
     is_running: bool = False
     error: str | None = None
     system_device: str = ""
