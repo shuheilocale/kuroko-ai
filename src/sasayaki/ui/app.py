@@ -11,6 +11,7 @@ from nicegui import ui
 
 from sasayaki.audio.capture import list_input_devices
 from sasayaki.config import Config
+from sasayaki.llm.client import LLMClient
 from sasayaki.pipeline.orchestrator import Pipeline
 from sasayaki.vision.screen_capture import ScreenCapture
 
@@ -89,6 +90,11 @@ class NiceGuiApp:
                 m["index"]: f"Monitor {m['index']} ({m['width']}x{m['height']})"
                 for m in monitors
             }
+            ollama_models = LLMClient.list_ollama_models()
+            backend_options = {
+                "ollama": "Ollama",
+                "llamacpp": "llama.cpp",
+            }
 
             with ui.row().classes("w-full items-center gap-4"):
                 system_select = ui.select(
@@ -107,13 +113,53 @@ class NiceGuiApp:
                     label="Screen Capture",
                 ).classes("w-56")
 
+            with ui.row().classes("w-full items-center gap-4"):
+                backend_select = ui.select(
+                    backend_options,
+                    value=self.config.llm_backend,
+                    label="LLM Backend",
+                ).classes("w-40")
+                model_select = ui.select(
+                    ollama_models or ["qwen3.5:9b"],
+                    value=self.config.ollama_model,
+                    label="Model (Ollama)",
+                ).classes("w-56")
+                llamacpp_url_input = ui.input(
+                    label="llama.cpp URL",
+                    value=self.config.llamacpp_url,
+                ).classes("w-56")
+
+                def on_backend_change():
+                    is_ollama = backend_select.value == "ollama"
+                    model_select.set_visibility(is_ollama)
+                    llamacpp_url_input.set_visibility(
+                        not is_ollama
+                    )
+
+                backend_select.on_value_change(on_backend_change)
+                on_backend_change()
+
                 def on_apply():
-                    self.config.system_audio_device = system_select.value
+                    self.config.system_audio_device = (
+                        system_select.value
+                    )
                     self.config.mic_device = mic_select.value
-                    self.config.screen_monitor = monitor_select.value
+                    self.config.screen_monitor = (
+                        monitor_select.value
+                    )
+                    self.config.llm_backend = backend_select.value
+                    self.config.ollama_model = model_select.value
+                    self.config.llamacpp_url = (
+                        llamacpp_url_input.value
+                    )
                     self._restart_pipeline()
+                    label = (
+                        model_select.value
+                        if backend_select.value == "ollama"
+                        else f"llama.cpp ({llamacpp_url_input.value})"
+                    )
                     ui.notify(
-                        "設定を適用しました。再起動中...",
+                        f"設定を適用しました ({label})",
                         type="info",
                     )
 
@@ -492,6 +538,7 @@ class NiceGuiApp:
             title="ささやき女将 - AI Meeting Assistant",
             reload=False,
         )
+
 
     async def _select_screen_region(
         self,

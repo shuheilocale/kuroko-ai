@@ -5,12 +5,12 @@ import threading
 import time
 
 import cv2
-import ollama
 
 from sasayaki.asr.transcriber import Transcriber
 from sasayaki.audio.capture import AudioCapture
 from sasayaki.audio.vad import VadGate
 from sasayaki.config import Config
+from sasayaki.llm.client import LLMClient
 from sasayaki.llm.profiler import ProfileExtractor
 from sasayaki.llm.suggester import ResponseSuggester
 from sasayaki.nlp.keyword_extractor import KeywordExtractor
@@ -167,14 +167,24 @@ class Pipeline:
         )
 
         # NLP & LLM
-        self._keyword_extractor = KeywordExtractor(config=self.config)
+        self._llm_client = LLMClient(
+            backend=self.config.llm_backend,
+            model=self.config.ollama_model,
+            llamacpp_url=self.config.llamacpp_url,
+        )
+        self._keyword_extractor = KeywordExtractor(
+            config=self.config, client=self._llm_client
+        )
         self._wiki = WikiLookup(config=self.config)
-        self._ollama_client = ollama.AsyncClient()
-        self._profiler = ProfileExtractor(config=self.config)
-        self._suggester = ResponseSuggester(config=self.config)
+        self._profiler = ProfileExtractor(
+            config=self.config, client=self._llm_client
+        )
+        self._suggester = ResponseSuggester(
+            config=self.config, client=self._llm_client
+        )
 
-        # Check Ollama
-        ollama_ok = await self._suggester.health_check()
+        # Check LLM backend
+        ollama_ok = await self._llm_client.health_check()
         if not ollama_ok:
             logger.warning(
                 "Ollama not available or model not found. "
@@ -227,6 +237,8 @@ class Pipeline:
                 self._face_analyzer.close()
             if self._screen_capture:
                 self._screen_capture.close()
+            if self._llm_client:
+                await self._llm_client.close()
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
@@ -495,17 +507,15 @@ class Pipeline:
         if not definition:
             source = "llm"
             try:
-                response = await self._ollama_client.chat(
-                    model=self.config.ollama_model,
+                response = await self._llm_client.chat(
                     messages=[
                         {"role": "system", "content": EXPLAIN_PROMPT},
                         {"role": "user", "content": term},
                     ],
-                    options={"temperature": 0.0, "num_predict": 150},
-                    think=False,
+                    temperature=0.0,
+                    max_tokens=150,
                 )
-                msg = response["message"]
-                definition = getattr(msg, "content", "") or msg.get("content", "")
+                definition = response.content
             except Exception:
                 logger.warning("LLM explain failed for: %s", term)
                 # Remove the placeholder on failure

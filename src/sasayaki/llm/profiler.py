@@ -2,9 +2,8 @@ import logging
 import re
 import time
 
-import ollama
-
 from sasayaki.config import Config
+from sasayaki.llm.client import LLMClient
 from sasayaki.types import PartnerProfile, ProfileFact
 
 logger = logging.getLogger(__name__)
@@ -30,9 +29,9 @@ SUMMARY_PROMPT = """\
 class ProfileExtractor:
     """Extracts profile information about the conversation partner using LLM."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, client: LLMClient):
         self.config = config
-        self._client = ollama.AsyncClient()
+        self._client = client
 
     async def extract(
         self, new_text: str, existing_profile: PartnerProfile
@@ -47,47 +46,44 @@ class ProfileExtractor:
 
         try:
             response = await self._client.chat(
-                model=self.config.ollama_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": new_text},
                 ],
-                options={"temperature": 0.0, "num_predict": 300},
-                think=False,
+                temperature=0.0,
+                max_tokens=300,
             )
         except Exception:
             logger.exception("Profile extraction failed")
             return []
 
-        msg = response["message"]
-        content = getattr(msg, "content", "") or msg.get("content", "")
-
+        content = response.content
         if not content or "なし" in content:
             return []
 
         return self._parse_facts(content)
 
-    async def generate_summary(self, profile: PartnerProfile) -> str:
+    async def generate_summary(
+        self, profile: PartnerProfile
+    ) -> str:
         if not profile.facts:
             return ""
 
         facts_text = self._format_existing(profile)
         try:
             response = await self._client.chat(
-                model=self.config.ollama_model,
                 messages=[
                     {"role": "system", "content": SUMMARY_PROMPT},
                     {"role": "user", "content": facts_text},
                 ],
-                options={"temperature": 0.3, "num_predict": 150},
-                think=False,
+                temperature=0.3,
+                max_tokens=150,
             )
         except Exception:
             logger.exception("Profile summary generation failed")
             return profile.summary
 
-        msg = response["message"]
-        return getattr(msg, "content", "") or msg.get("content", "") or ""
+        return response.content or ""
 
     def _format_existing(self, profile: PartnerProfile) -> str:
         lines = []

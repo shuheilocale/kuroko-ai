@@ -41,7 +41,9 @@ class Config:
     wiki_max_sentences: int = 2
 
     # LLM
+    llm_backend: str = "ollama"  # "ollama" or "llamacpp"
     ollama_model: str = "qwen3.5:9b"
+    llamacpp_url: str = "http://127.0.0.1:8080"
     llm_context_turns: int = 5
     llm_debounce_sec: float = 1.5
 
