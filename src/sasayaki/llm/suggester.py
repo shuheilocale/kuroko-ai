@@ -1,9 +1,8 @@
 import logging
 import re
 
-import ollama
-
 from sasayaki.config import Config
+from sasayaki.llm.client import LLMClient
 from sasayaki.types import TranscriptEvent
 
 logger = logging.getLogger(__name__)
@@ -33,42 +32,45 @@ RESPONSE_STYLES = {
 
 
 class ResponseSuggester:
-    """Generates response suggestions using a local Ollama LLM."""
+    """Generates response suggestions using LLM."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, client: LLMClient):
         self.config = config
-        self._client = ollama.AsyncClient()
+        self._client = client
 
     async def suggest(
-        self, transcripts: list[TranscriptEvent], style: str = "深堀り"
+        self,
+        transcripts: list[TranscriptEvent],
+        style: str = "深堀り",
     ) -> list[str]:
-        """Generate 3 suggestions based on recent conversation context and style."""
+        """Generate 3 suggestions based on conversation context and style."""
         if not transcripts:
             return []
 
-        style_instruction = RESPONSE_STYLES.get(style, RESPONSE_STYLES["深堀り"])
-        system_prompt = SYSTEM_PROMPT.format(style_instruction=style_instruction)
+        style_instruction = RESPONSE_STYLES.get(
+            style, RESPONSE_STYLES["深堀り"]
+        )
+        system_prompt = SYSTEM_PROMPT.format(
+            style_instruction=style_instruction
+        )
 
         context = self._build_context(transcripts)
         prompt = f"【会話の文脈】\n{context}"
 
         try:
             response = await self._client.chat(
-                model=self.config.ollama_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
-                options={"temperature": 0.7, "num_predict": 512},
-                think=False,
+                temperature=0.7,
+                max_tokens=512,
             )
         except Exception:
-            logger.exception("Ollama request failed")
+            logger.exception("LLM request failed")
             return []
 
-        msg = response["message"]
-        text = getattr(msg, "content", "") or msg.get("content", "")
-        return self._parse_suggestions(text)
+        return self._parse_suggestions(response.content)
 
     def _build_context(self, transcripts: list[TranscriptEvent]) -> str:
         recent = transcripts[-self.config.llm_context_turns * 2 :]
@@ -92,12 +94,3 @@ class ResponseSuggester:
                     suggestions.append(content)
         return suggestions[:3]
 
-    async def health_check(self) -> bool:
-        """Check if Ollama is running and the model is available."""
-        try:
-            result = await self._client.list()
-            model_list = result.models if hasattr(result, "models") else result.get("models", [])
-            available = [getattr(m, "model", None) or m.get("model", "") for m in model_list]
-            return any(self.config.ollama_model in m for m in available)
-        except Exception:
-            return False
