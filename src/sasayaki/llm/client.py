@@ -127,8 +127,11 @@ class LLMClient:
             return False
 
     @staticmethod
-    def list_ollama_models() -> list[str]:
-        """List available Ollama models (sync)."""
+    def list_ollama_models() -> dict[str, str]:
+        """List available Ollama models with display labels.
+
+        Returns dict of {model_id: display_label}.
+        """
         try:
             client = ollama.Client()
             result = client.list()
@@ -137,12 +140,33 @@ class LLMClient:
                 if hasattr(result, "models")
                 else result.get("models", [])
             )
-            return [
-                getattr(m, "model", None) or m.get("model", "")
-                for m in models
-            ]
+            out = {}
+            for m in models:
+                name = (
+                    getattr(m, "model", None)
+                    or m.get("model", "")
+                )
+                size_bytes = (
+                    getattr(m, "size", 0)
+                    or m.get("size", 0)
+                )
+                params = (
+                    getattr(
+                        getattr(m, "details", None),
+                        "parameter_size", "",
+                    )
+                    if hasattr(m, "details")
+                    else ""
+                )
+                if size_bytes:
+                    gb = size_bytes / (1024 ** 3)
+                    label = f"{name} ({params}, {gb:.1f}GB)" if params else f"{name} ({gb:.1f}GB)"
+                else:
+                    label = name
+                out[name] = label
+            return out
         except Exception:
-            return []
+            return {}
 
     async def close(self):
         await self._http.aclose()

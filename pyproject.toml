@@ -20,6 +20,9 @@ dependencies = [
     "mss>=9.0",
     "opencv-python-headless>=4.8",
     "httpx>=0.27",
+    "maai>=0.1",
+    "omnivoice>=0.1",
+    "resampy>=0.4",
 ]
 
 [project.optional-dependencies]

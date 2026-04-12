@@ -78,6 +78,16 @@ class FaceAnalysisState:
 
 
 @dataclass
+class TurnTakingState:
+    """MaAI turn-taking prediction state."""
+    p_now: float = 0.0
+    p_future: float = 0.0
+    is_turn_change: bool = False
+    last_trigger_time: float = 0.0
+    enabled: bool = False
+
+
+@dataclass
 class PipelineState:
     """Shared mutable state polled by the UI."""
 
@@ -96,3 +106,6 @@ class PipelineState:
     system_level: float = 0.0
     mic_level: float = 0.0
     face: FaceAnalysisState = field(default_factory=FaceAnalysisState)
+    turn_taking: TurnTakingState = field(default_factory=TurnTakingState)
+    tts_playing: bool = False
+    auto_suggestion_pending: bool = False

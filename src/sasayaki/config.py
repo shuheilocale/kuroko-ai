@@ -42,7 +42,7 @@ class Config:
 
     # LLM
     llm_backend: str = "ollama"  # "ollama" or "llamacpp"
-    ollama_model: str = "qwen3.5:9b"
+    ollama_model: str = "gemma4:e2b"
     llamacpp_url: str = "http://127.0.0.1:8080"
     llm_context_turns: int = 5
     llm_debounce_sec: float = 1.5
@@ -53,6 +53,26 @@ class Config:
     # Profile
     profile_max_facts: int = 50
     profile_summary_interval: int = 5
+
+    # Turn-Taking (MaAI)
+    maai_enabled: bool = True
+    maai_frame_rate: int = 10
+    maai_device: str = "cpu"
+    turn_taking_threshold: float = 0.6
+    turn_taking_cooldown_sec: float = 8.0
+    turn_taking_min_transcripts: int = 3
+    auto_suggest_style: str = "深堀り"
+
+    # TTS (ささやき)
+    tts_enabled: bool = True
+    tts_backend: str = "omnivoice"
+    tts_omnivoice_model: str = "k2-fsa/OmniVoice"
+    tts_omnivoice_instruct: str = (
+        "female, elderly, whisper, very low pitch"
+    )
+    tts_omnivoice_speed: float = 1.1
+    tts_output_device: str = ""
+    tts_volume: float = 0.6
 
     # UI
     ui_max_transcript_messages: int = 100

@@ -18,6 +18,7 @@ from sasayaki.nlp.wiki import WikiLookup
 from sasayaki.types import (
     EntityEvent, ExpressionChangeEvent, FaceAnalysisState,
     PartnerProfile, PipelineState, TranscriptEvent,
+    TurnTakingState,
 )
 from sasayaki.vision.face_analyzer import FaceAnalyzer
 from sasayaki.vision.screen_capture import ScreenCapture
@@ -45,6 +46,9 @@ class Pipeline:
         self._mic_capture: AudioCapture | None = None
         self._face_analyzer: FaceAnalyzer | None = None
         self._screen_capture: ScreenCapture | None = None
+        self._turn_taking_monitor = None
+        self._whisper_playback = None
+        self._tts_end_time: float = 0.0
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -86,6 +90,26 @@ class Pipeline:
                         self.state.face.face_image_base64
                     ),
                 ),
+                turn_taking=TurnTakingState(
+                    p_now=self.state.turn_taking.p_now,
+                    p_future=(
+                        self.state.turn_taking.p_future
+                    ),
+                    is_turn_change=(
+                        self.state.turn_taking.is_turn_change
+                    ),
+                    last_trigger_time=(
+                        self.state.turn_taking
+                        .last_trigger_time
+                    ),
+                    enabled=(
+                        self.state.turn_taking.enabled
+                    ),
+                ),
+                tts_playing=self.state.tts_playing,
+                auto_suggestion_pending=(
+                    self.state.auto_suggestion_pending
+                ),
             )
 
     def add_manual_keyword(self, term: str):
@@ -126,22 +150,67 @@ class Pipeline:
         logger.info("Pipeline starting...")
         self._loop = asyncio.get_event_loop()
 
-        # Queues
-        system_audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
-        mic_audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
-        system_speech_q: asyncio.Queue = asyncio.Queue(maxsize=10)
-        mic_speech_q: asyncio.Queue = asyncio.Queue(maxsize=10)
-        transcript_q: asyncio.Queue = asyncio.Queue(maxsize=50)
+        # Check MaAI availability
+        maai_ok = False
+        if self.config.maai_enabled:
+            try:
+                from maai import Maai, MaaiInput  # noqa: F401
+                maai_ok = True
+            except ImportError:
+                logger.warning(
+                    "MaAI not installed. "
+                    "Turn-taking prediction disabled."
+                )
+
+        # Queues — raw queues feed tee when MaAI active
+        system_speech_q: asyncio.Queue = asyncio.Queue(
+            maxsize=10
+        )
+        mic_speech_q: asyncio.Queue = asyncio.Queue(
+            maxsize=10
+        )
+        transcript_q: asyncio.Queue = asyncio.Queue(
+            maxsize=50
+        )
+
+        if maai_ok:
+            system_raw_q: asyncio.Queue = asyncio.Queue(
+                maxsize=100
+            )
+            mic_raw_q: asyncio.Queue = asyncio.Queue(
+                maxsize=100
+            )
+            system_vad_q: asyncio.Queue = asyncio.Queue(
+                maxsize=100
+            )
+            mic_vad_q: asyncio.Queue = asyncio.Queue(
+                maxsize=100
+            )
+            system_maai_q: asyncio.Queue = asyncio.Queue(
+                maxsize=200
+            )
+            mic_maai_q: asyncio.Queue = asyncio.Queue(
+                maxsize=200
+            )
+            capture_sys_q = system_raw_q
+            capture_mic_q = mic_raw_q
+            vad_sys_q = system_vad_q
+            vad_mic_q = mic_vad_q
+        else:
+            capture_sys_q = asyncio.Queue(maxsize=100)
+            capture_mic_q = asyncio.Queue(maxsize=100)
+            vad_sys_q = capture_sys_q
+            vad_mic_q = capture_mic_q
 
         # Audio capture
         try:
             self._system_capture = AudioCapture(
                 config=self.config, source="system",
-                queue=system_audio_q, loop=self._loop,
+                queue=capture_sys_q, loop=self._loop,
             )
             self._mic_capture = AudioCapture(
                 config=self.config, source="mic",
-                queue=mic_audio_q, loop=self._loop,
+                queue=capture_mic_q, loop=self._loop,
             )
         except RuntimeError as e:
             logger.error("Audio device error: %s", e)
@@ -152,11 +221,13 @@ class Pipeline:
         # VAD
         system_vad = VadGate(
             config=self.config, source="system",
-            input_queue=system_audio_q, output_queue=system_speech_q,
+            input_queue=vad_sys_q,
+            output_queue=system_speech_q,
         )
         mic_vad = VadGate(
             config=self.config, source="mic",
-            input_queue=mic_audio_q, output_queue=mic_speech_q,
+            input_queue=vad_mic_q,
+            output_queue=mic_speech_q,
         )
 
         # ASR
@@ -191,6 +262,15 @@ class Pipeline:
                 "Suggestions and LLM keyword extraction will be disabled."
             )
 
+        # TTS whisper playback
+        if self.config.tts_enabled:
+            from sasayaki.tts.whisper_playback import (
+                WhisperPlayback,
+            )
+            self._whisper_playback = WhisperPlayback(
+                self.config
+            )
+
         # Face analysis
         self._face_analyzer = FaceAnalyzer()
         self._screen_capture = ScreenCapture(
@@ -209,15 +289,26 @@ class Pipeline:
         logger.info("Pipeline running. Listening...")
 
         self._tasks = [
-            asyncio.create_task(system_vad.run(), name="system_vad"),
-            asyncio.create_task(mic_vad.run(), name="mic_vad"),
             asyncio.create_task(
-                self._merge_queues(system_speech_q, mic_speech_q, merged_speech_q),
+                system_vad.run(), name="system_vad"
+            ),
+            asyncio.create_task(
+                mic_vad.run(), name="mic_vad"
+            ),
+            asyncio.create_task(
+                self._merge_queues(
+                    system_speech_q, mic_speech_q,
+                    merged_speech_q,
+                ),
                 name="merge",
             ),
-            asyncio.create_task(transcriber.run(), name="transcriber"),
             asyncio.create_task(
-                self._process_transcripts(transcript_q, ollama_ok),
+                transcriber.run(), name="transcriber"
+            ),
+            asyncio.create_task(
+                self._process_transcripts(
+                    transcript_q, ollama_ok
+                ),
                 name="processor",
             ),
             asyncio.create_task(
@@ -226,6 +317,33 @@ class Pipeline:
             ),
         ]
 
+        # MaAI turn-taking tasks
+        if maai_ok:
+            self._tasks.extend([
+                asyncio.create_task(
+                    self._tee_queue(
+                        system_raw_q,
+                        system_vad_q,
+                        system_maai_q,
+                    ),
+                    name="tee_system",
+                ),
+                asyncio.create_task(
+                    self._tee_queue(
+                        mic_raw_q,
+                        mic_vad_q,
+                        mic_maai_q,
+                    ),
+                    name="tee_mic",
+                ),
+                asyncio.create_task(
+                    self._turn_taking_loop(
+                        system_maai_q, mic_maai_q,
+                    ),
+                    name="turn_taking",
+                ),
+            ])
+
         try:
             await asyncio.gather(*self._tasks)
         except asyncio.CancelledError:
@@ -233,6 +351,8 @@ class Pipeline:
         finally:
             self._system_capture.stop()
             self._mic_capture.stop()
+            if self._turn_taking_monitor:
+                self._turn_taking_monitor.stop()
             if self._face_analyzer:
                 self._face_analyzer.close()
             if self._screen_capture:
@@ -242,6 +362,132 @@ class Pipeline:
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
+
+    async def _tee_queue(self, source, dest1, dest2):
+        """Copy each item from source to both dest1 and dest2."""
+        while True:
+            item = await source.get()
+            try:
+                dest1.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+            try:
+                dest2.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+
+    async def _turn_taking_loop(
+        self, system_maai_q, mic_maai_q
+    ):
+        """Feed MaAI and monitor turn-taking."""
+        from sasayaki.audio.turn_taking import (
+            TurnTakingMonitor,
+        )
+
+        monitor = TurnTakingMonitor(self.config)
+        self._turn_taking_monitor = monitor
+        try:
+            monitor.start()
+        except Exception:
+            logger.exception("MaAI failed to start")
+            return
+
+        async def feed_system():
+            while True:
+                frame = await system_maai_q.get()
+                monitor.feed_system(frame)
+
+        async def feed_mic():
+            while True:
+                frame = await mic_maai_q.get()
+                monitor.feed_mic(frame)
+
+        async def poll_predictions():
+            while True:
+                await asyncio.sleep(0.1)
+                pred = monitor.get_prediction()
+                p_now = pred["p_now"]
+                p_future = pred["p_future"]
+
+                threshold = self.config.turn_taking_threshold
+                is_turn = p_now > threshold
+
+                now = time.monotonic()
+                with self._lock:
+                    tt = self.state.turn_taking
+                    tt.p_now = p_now
+                    tt.p_future = p_future
+                    tt.is_turn_change = is_turn
+                    tt.enabled = True
+                    n_transcripts = len(
+                        self.state.transcripts
+                    )
+                    suggesting = self.state.suggesting
+                    last_trigger = tt.last_trigger_time
+
+                cooldown = (
+                    self.config.turn_taking_cooldown_sec
+                )
+                min_t = (
+                    self.config.turn_taking_min_transcripts
+                )
+                if (
+                    is_turn
+                    and now - last_trigger > cooldown
+                    and not suggesting
+                    and n_transcripts >= min_t
+                    and self.state.ollama_ok
+                ):
+                    with self._lock:
+                        tt.last_trigger_time = now
+                        self.state.suggesting = True
+                    asyncio.create_task(
+                        self._auto_suggest_and_whisper()
+                    )
+
+        await asyncio.gather(
+            feed_system(), feed_mic(), poll_predictions()
+        )
+
+    async def _auto_suggest_and_whisper(self):
+        """Auto-generate a suggestion and TTS whisper it."""
+        style = self.config.auto_suggest_style
+        with self._lock:
+            self.state.suggesting = True
+            self.state.suggestion_style = f"[自動] {style}"
+            self.state.auto_suggestion_pending = True
+            transcripts = list(self.state.transcripts)
+
+        try:
+            suggestions = await self._suggester.suggest(
+                transcripts, style
+            )
+            if suggestions:
+                with self._lock:
+                    self.state.suggestions = suggestions
+
+                if (
+                    self.config.tts_enabled
+                    and self._whisper_playback
+                ):
+                    with self._lock:
+                        self.state.tts_playing = True
+                    try:
+                        await self._whisper_playback.speak(
+                            suggestions[0]
+                        )
+                    finally:
+                        with self._lock:
+                            self.state.tts_playing = False
+                            self._tts_end_time = (
+                                time.monotonic()
+                            )
+        except Exception:
+            logger.exception("Auto-suggest failed")
+        finally:
+            with self._lock:
+                self.state.suggesting = False
+                self.state.auto_suggestion_pending = False
 
     async def _merge_queues(self, q1, q2, out):
         async def forward(src):
@@ -255,8 +501,25 @@ class Pipeline:
         transcript_q: asyncio.Queue,
         ollama_ok: bool,
     ):
+        TTS_SUPPRESS_SEC = 2.0
         while True:
             event: TranscriptEvent = await transcript_q.get()
+
+            # Suppress system transcripts during/after
+            # TTS to avoid picking up our own whisper
+            if event.source == "system":
+                with self._lock:
+                    playing = self.state.tts_playing
+                elapsed = (
+                    time.monotonic() - self._tts_end_time
+                )
+                if playing or elapsed < TTS_SUPPRESS_SEC:
+                    logger.debug(
+                        "Suppressed system transcript "
+                        "during TTS: %s",
+                        event.text[:30],
+                    )
+                    continue
 
             # Update transcript state
             with self._lock:
