@@ -3015,6 +3015,7 @@ name = "sasayaki"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "ginza" },
     { name = "httpx" },
     { name = "ja-ginza" },
@@ -3027,25 +3028,30 @@ dependencies = [
     { name = "ollama" },
     { name = "omnivoice" },
     { name = "opencv-python-headless" },
+    { name = "pydantic" },
     { name = "resampy" },
     { name = "silero-vad" },
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "spacy" },
     { name = "torch" },
+    { name = "uvicorn", extra = ["standard"] },
     { name = "wikipedia-api" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.110" },
     { name = "ginza", specifier = ">=5.2" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "ja-ginza", specifier = ">=5.2" },
     { name = "maai", specifier = ">=0.1" },
     { name = "mediapipe", specifier = ">=0.10" },
@@ -3056,6 +3062,7 @@ requires-dist = [
     { name = "ollama", specifier = ">=0.4" },
     { name = "omnivoice", specifier = ">=0.1" },
     { name = "opencv-python-headless", specifier = ">=4.8" },
+    { name = "pydantic", specifier = ">=2.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "resampy", specifier = ">=0.4" },
@@ -3064,6 +3071,7 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.12" },
     { name = "spacy", specifier = ">=3.7" },
     { name = "torch", specifier = ">=2.3.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
     { name = "wikipedia-api", specifier = ">=0.7" },
 ]
 provides-extras = ["dev"]
