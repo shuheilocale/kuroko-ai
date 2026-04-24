@@ -1,0 +1,51 @@
+import type { TranscriptEvent } from "@/lib/types";
+import { cn, formatTime } from "@/lib/utils";
+
+export function ChatBubble({ evt }: { evt: TranscriptEvent }) {
+  const isMic = evt.source === "mic";
+  const time = (
+    <span
+      className={cn(
+        "shrink-0 pt-1 font-mono text-[10px] tabular-nums",
+        "text-[color:var(--color-fg-subtle)]",
+      )}
+    >
+      {formatTime(evt.timestamp)}
+    </span>
+  );
+  const bubble = (
+    <div
+      className={cn(
+        "max-w-[78%] rounded-md border px-3 py-1.5",
+        "text-[13px] leading-relaxed",
+        isMic
+          ? "border-[color:var(--color-mic)]/25 bg-[color:var(--color-mic)]/10"
+          : "border-[color:var(--color-system)]/25 bg-[color:var(--color-system)]/10",
+        evt.is_partial && "italic opacity-70",
+      )}
+    >
+      {evt.text}
+    </div>
+  );
+
+  return (
+    <div
+      className={cn(
+        "flex gap-2",
+        isMic ? "justify-end" : "justify-start",
+      )}
+    >
+      {isMic ? (
+        <>
+          {bubble}
+          {time}
+        </>
+      ) : (
+        <>
+          {time}
+          {bubble}
+        </>
+      )}
+    </div>
+  );
+}
