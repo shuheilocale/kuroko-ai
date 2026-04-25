@@ -27,12 +27,8 @@ export function Header({ state, status, onOpenSettings }: Props) {
         "flex h-11 items-center gap-4 border-b px-4",
         "border-[color:var(--color-border)] bg-[color:var(--color-surface)]",
       )}
-      data-tauri-drag-region
     >
-      <div
-        className="ml-16 flex items-center gap-2"
-        data-tauri-drag-region
-      >
+      <div className="flex items-center gap-2">
         <Activity
           className="size-4 text-[color:var(--color-accent)]"
           aria-hidden
