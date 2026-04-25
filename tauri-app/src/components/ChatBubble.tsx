@@ -1,3 +1,5 @@
+import { motion } from "framer-motion";
+
 import type { TranscriptEvent } from "@/lib/types";
 import { cn, formatTime } from "@/lib/utils";
 
@@ -29,7 +31,10 @@ export function ChatBubble({ evt }: { evt: TranscriptEvent }) {
   );
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: "easeOut" }}
       className={cn(
         "flex gap-2",
         isMic ? "justify-end" : "justify-start",
@@ -46,6 +51,6 @@ export function ChatBubble({ evt }: { evt: TranscriptEvent }) {
           {bubble}
         </>
       )}
-    </div>
+    </motion.div>
   );
 }

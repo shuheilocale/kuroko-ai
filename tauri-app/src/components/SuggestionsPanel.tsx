@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 
 import { StyleButton } from "@/components/StyleButton";
@@ -63,17 +64,29 @@ export function SuggestionsPanel({ state }: Props) {
               : "スタイルを選ぶか、ターンテイキング検出を待つ"}
           </div>
         ) : (
-          <ol className="space-y-3">
+          // Re-key when the batch changes so motion replays for new
+          // suggestions instead of treating updates as in-place edits.
+          <ol
+            key={state.suggestions.join("")}
+            className="space-y-3"
+          >
             {state.suggestions.map((s, i) => (
-              <li
+              <motion.li
                 key={i}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.22,
+                  ease: "easeOut",
+                  delay: i * 0.06,
+                }}
                 className="grid grid-cols-[1.25rem_1fr] gap-2 text-[13px] leading-relaxed"
               >
                 <span className="font-mono text-[color:var(--color-accent)]">
                   {i + 1}.
                 </span>
                 <span>{s}</span>
-              </li>
+              </motion.li>
             ))}
           </ol>
         )}
