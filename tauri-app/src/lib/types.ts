@@ -93,6 +93,7 @@ export interface PipelineState {
   silence_rescue_enabled: boolean;
   silence_rescue_seconds: number;
   silence_rescue_style: string;
+  speculative_pre_fire_enabled: boolean;
 }
 
 export type ContextMode = "fixed" | "since_last_fire";

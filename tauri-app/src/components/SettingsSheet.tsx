@@ -314,6 +314,17 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     onChange={(v) => set("auto_suggest_style", v)}
                   />
                 </Field>
+                <ToggleRow
+                  label="先読み生成"
+                  hint="しきい値に近づいた時点で LLM を裏で投げ、本発火の応答を高速化"
+                  checked={pick(
+                    "speculative_pre_fire_enabled",
+                    state?.speculative_pre_fire_enabled ?? true,
+                  )}
+                  onChange={(v) =>
+                    set("speculative_pre_fire_enabled", v)
+                  }
+                />
               </Section>
 
               <Section title="沈黙レスキュー">

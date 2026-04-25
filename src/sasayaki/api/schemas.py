@@ -95,6 +95,7 @@ class PipelineStateSchema(_Base):
     silence_rescue_enabled: bool = True
     silence_rescue_seconds: float = 6.0
     silence_rescue_style: str = "話題転換"
+    speculative_pre_fire_enabled: bool = True
 
 
 class MonitorInfo(BaseModel):
@@ -143,6 +144,7 @@ class SettingsPatch(BaseModel):
     silence_rescue_seconds: float | None = None
     silence_rescue_style: str | None = None
     tts_chime_enabled: bool | None = None
+    speculative_pre_fire_enabled: bool | None = None
 
 
 class DeviceInfo(BaseModel):

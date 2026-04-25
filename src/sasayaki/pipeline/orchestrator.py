@@ -56,6 +56,13 @@ class Pipeline:
         # Monotonic time of the last silence-rescue trigger so the loop
         # doesn't re-fire while the silence persists.
         self._last_silence_rescue_mono: float = 0.0
+        # Speculative pre-fire generation: a background suggester call
+        # started before p_now crosses the trigger threshold so its
+        # result can be reused if the trigger then confirms.
+        self._spec_task: asyncio.Task | None = None
+        self._spec_started_mono: float = 0.0
+        self._spec_style: str = ""
+        self._spec_suggestions: list[str] | None = None
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -153,6 +160,9 @@ class Pipeline:
                 ),
                 silence_rescue_style=(
                     self.config.silence_rescue_style
+                ),
+                speculative_pre_fire_enabled=(
+                    self.config.speculative_pre_fire_enabled
                 ),
             )
 
@@ -256,6 +266,7 @@ class Pipeline:
         self._llm_task = None
         self._keyword_task = None
         self._last_fire_transcript_ts = 0.0
+        self._reset_speculative_fire()
         self._keyword_processed_texts = []
         self._profile_task = None
         self._profile_processed_idx = 0
@@ -612,25 +623,121 @@ class Pipeline:
                 has_new_speech = (
                     latest_t_ts > self._last_fire_transcript_ts
                 )
-                if (
-                    is_turn
-                    and has_new_speech
+                base_conditions = (
+                    has_new_speech
                     and now - last_trigger > cooldown
                     and not suggesting
                     and n_transcripts >= min_t
                     and self.state.ollama_ok
+                )
+
+                # Speculative pre-fire: warm up the LLM as soon as
+                # p_now climbs into the run-up zone so candidates are
+                # buffered by the time we cross the real threshold.
+                pre_offset = (
+                    self.config.speculative_pre_fire_offset
+                )
+                pre_fire_threshold = max(
+                    0.0, threshold - pre_offset
+                )
+                if (
+                    self.config.speculative_pre_fire_enabled
+                    and p_now >= pre_fire_threshold
+                    and base_conditions
                 ):
+                    spec_style = self.config.auto_suggest_style
+                    with self._lock:
+                        spec_transcripts = list(
+                            self.state.transcripts
+                        )
+                    spec_transcripts = (
+                        self._select_context_transcripts(
+                            spec_transcripts
+                        )
+                    )
+                    self._start_speculative_fire(
+                        spec_transcripts, spec_style
+                    )
+
+                if is_turn and base_conditions:
                     with self._lock:
                         tt.last_trigger_time = now
                         self.state.suggesting = True
                     self._last_fire_transcript_ts = latest_t_ts
+                    style = self.config.auto_suggest_style
+                    buffered = self._consume_speculative_fire(
+                        style
+                    )
                     asyncio.create_task(
-                        self._auto_suggest_and_whisper()
+                        self._auto_suggest_and_whisper(
+                            style=style,
+                            buffered_suggestions=buffered,
+                        )
                     )
 
         await asyncio.gather(
             feed_system(), feed_mic(), poll_predictions()
         )
+
+    def _start_speculative_fire(
+        self,
+        transcripts: list[TranscriptEvent],
+        style: str,
+    ) -> None:
+        """Kick off an LLM call ahead of the actual fire trigger so the
+        candidates are already buffered when the threshold confirms."""
+        if (
+            self._spec_task is not None
+            and not self._spec_task.done()
+        ):
+            return
+        if self._spec_suggestions is not None:
+            return
+        if not transcripts:
+            return
+        self._spec_started_mono = time.monotonic()
+        self._spec_style = style
+        self._spec_suggestions = None
+        self._spec_task = asyncio.create_task(
+            self._suggester.suggest(transcripts, style),
+            name="speculative_suggest",
+        )
+
+        def _done(task: asyncio.Task) -> None:
+            try:
+                self._spec_suggestions = task.result()
+            except (asyncio.CancelledError, Exception):
+                self._spec_suggestions = None
+
+        self._spec_task.add_done_callback(_done)
+
+    def _consume_speculative_fire(
+        self, expected_style: str
+    ) -> list[str] | None:
+        """Take buffered speculative suggestions if fresh and matching,
+        otherwise return None and let the caller hit the LLM."""
+        if self._spec_suggestions is None:
+            return None
+        if self._spec_style != expected_style:
+            return None
+        age = time.monotonic() - self._spec_started_mono
+        if age > self.config.speculative_max_age_sec:
+            self._reset_speculative_fire()
+            return None
+        suggestions = self._spec_suggestions
+        self._reset_speculative_fire()
+        return suggestions
+
+    def _reset_speculative_fire(self) -> None:
+        if (
+            self._spec_task is not None
+            and not self._spec_task.done()
+        ):
+            self._spec_task.cancel()
+        self._spec_task = None
+        self._spec_started_mono = 0.0
+        self._spec_style = ""
+        self._spec_suggestions = None
 
     def _select_context_transcripts(
         self, transcripts: list[TranscriptEvent]
@@ -656,8 +763,14 @@ class Pipeline:
         self,
         style: str | None = None,
         label_prefix: str = "自動",
+        buffered_suggestions: list[str] | None = None,
     ):
-        """Auto-generate a suggestion and TTS whisper it."""
+        """Auto-generate a suggestion and TTS whisper it.
+
+        If buffered_suggestions is provided (typically by speculative
+        pre-fire), the LLM call is skipped entirely and we go straight
+        to TTS — no waiting for round-trip latency.
+        """
         if style is None:
             style = self.config.auto_suggest_style
         with self._lock:
@@ -668,9 +781,12 @@ class Pipeline:
 
         transcripts = self._select_context_transcripts(transcripts)
         try:
-            suggestions = await self._suggester.suggest(
-                transcripts, style
-            )
+            if buffered_suggestions is not None:
+                suggestions = buffered_suggestions
+            else:
+                suggestions = await self._suggester.suggest(
+                    transcripts, style
+                )
             if suggestions:
                 with self._lock:
                     self.state.suggestions = suggestions

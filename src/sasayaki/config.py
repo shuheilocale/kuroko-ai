@@ -72,6 +72,13 @@ class Config:
     silence_rescue_seconds: float = 6.0
     silence_rescue_style: str = "話題転換"
 
+    # Speculative pre-fire LLM generation: start the suggestion call as
+    # soon as p_now climbs to (threshold - offset) so candidates are
+    # ready by the time the real fire crosses the threshold.
+    speculative_pre_fire_enabled: bool = True
+    speculative_pre_fire_offset: float = 0.2
+    speculative_max_age_sec: float = 5.0
+
     # TTS (ささやき)
     tts_enabled: bool = True
     tts_backend: str = "omnivoice"

@@ -128,3 +128,4 @@ class PipelineState:
     silence_rescue_enabled: bool = True
     silence_rescue_seconds: float = 6.0
     silence_rescue_style: str = "話題転換"
+    speculative_pre_fire_enabled: bool = True
