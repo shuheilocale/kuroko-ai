@@ -164,6 +164,7 @@ class Pipeline:
                 speculative_pre_fire_enabled=(
                     self.config.speculative_pre_fire_enabled
                 ),
+                last_whisper_text=self.state.last_whisper_text,
             )
 
     def add_manual_keyword(self, term: str):
@@ -181,6 +182,34 @@ class Pipeline:
             self._generate_suggestions_styled(style),
             self._loop,
         )
+
+    def request_replay(self) -> bool:
+        """Replay the last whispered suggestion. Returns True if a
+        replay was scheduled, False if there's nothing to replay or
+        TTS is busy."""
+        if self._loop is None:
+            return False
+        with self._lock:
+            text = self.state.last_whisper_text
+            playing = self.state.tts_playing
+        if not text or playing or not self._whisper_playback:
+            return False
+        asyncio.run_coroutine_threadsafe(
+            self._replay_last_whisper(text), self._loop
+        )
+        return True
+
+    async def _replay_last_whisper(self, text: str) -> None:
+        if not self._whisper_playback:
+            return
+        with self._lock:
+            self.state.tts_playing = True
+        try:
+            await self._whisper_playback.speak(text)
+        finally:
+            with self._lock:
+                self.state.tts_playing = False
+                self._tts_end_time = time.monotonic()
 
     def request_stop(self):
         """Request the pipeline to stop. Safe to call from any thread."""
@@ -797,6 +826,7 @@ class Pipeline:
                 ):
                     with self._lock:
                         self.state.tts_playing = True
+                        self.state.last_whisper_text = suggestions[0]
                     try:
                         await self._whisper_playback.speak(
                             suggestions[0]

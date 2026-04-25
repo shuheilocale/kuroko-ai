@@ -222,6 +222,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         manager.pipeline.add_manual_keyword(req.term)
         return OkResponse()
 
+    @app.post("/api/replay", response_model=OkResponse)
+    async def replay():
+        ok = manager.pipeline.request_replay()
+        return OkResponse(ok=ok)
+
     @app.post("/api/stop", response_model=OkResponse)
     async def stop():
         await manager.stop()

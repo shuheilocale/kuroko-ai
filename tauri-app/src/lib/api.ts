@@ -46,6 +46,7 @@ export const api = {
     post<{ ok: boolean }>("/api/suggest", { style }),
   keyword: (term: string) =>
     post<{ ok: boolean }>("/api/keyword", { term }),
+  replay: () => post<{ ok: boolean }>("/api/replay"),
   stop: () => post<{ ok: boolean }>("/api/stop"),
   restart: () => post<{ ok: boolean }>("/api/restart"),
   settings: (patch: Record<string, unknown>) =>

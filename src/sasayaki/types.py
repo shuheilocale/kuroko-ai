@@ -129,3 +129,6 @@ class PipelineState:
     silence_rescue_seconds: float = 6.0
     silence_rescue_style: str = "話題転換"
     speculative_pre_fire_enabled: bool = True
+    # Most recently whispered suggestion. Used as the source for the
+    # "replay last whisper" hotkey.
+    last_whisper_text: str = ""

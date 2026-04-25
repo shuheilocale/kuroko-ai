@@ -96,6 +96,7 @@ class PipelineStateSchema(_Base):
     silence_rescue_seconds: float = 6.0
     silence_rescue_style: str = "話題転換"
     speculative_pre_fire_enabled: bool = True
+    last_whisper_text: str = ""
 
 
 class MonitorInfo(BaseModel):

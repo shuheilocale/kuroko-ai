@@ -7,7 +7,7 @@ import { ProfilePanel } from "@/components/ProfilePanel";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { SuggestionsPanel } from "@/components/SuggestionsPanel";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
-import { connectStateSocket } from "@/lib/api";
+import { api, connectStateSocket } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 
 export default function App() {
@@ -26,11 +26,27 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+        return;
+      }
+      // Space: replay last whisper. Skip while typing or holding mods.
+      if (
+        e.code === "Space" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.repeat &&
+        !settingsOpen &&
+        !isTextInputFocused()
+      ) {
+        e.preventDefault();
+        api.replay().catch((err) =>
+          console.error("[replay] failed:", err),
+        );
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [settingsOpen]);
 
   return (
     <main className="flex h-full flex-col bg-[color:var(--color-bg)]">
@@ -91,6 +107,15 @@ export default function App() {
       />
     </main>
   );
+}
+
+function isTextInputFocused(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return true;
+  if ((el as HTMLElement).isContentEditable) return true;
+  return false;
 }
 
 function PanelPlaceholder({
