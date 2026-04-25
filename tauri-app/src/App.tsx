@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
+import { FaceAnalysisPanel } from "@/components/FaceAnalysisPanel";
 import { Header } from "@/components/Header";
+import { KeywordsPanel } from "@/components/KeywordsPanel";
+import { ProfilePanel } from "@/components/ProfilePanel";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { SuggestionsPanel } from "@/components/SuggestionsPanel";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
@@ -35,10 +38,31 @@ export default function App() {
         )}
       </div>
 
-      <div className="grid h-[180px] shrink-0 grid-cols-3 gap-3 px-3 pb-3 grid-rows-[minmax(0,1fr)]">
-        <PanelPlaceholder label="キーワード" hint="P4 で実装" />
-        <PanelPlaceholder label="相手のプロフィール" hint="P4 で実装" />
-        <PanelPlaceholder label="表情分析" hint="P4 で実装" />
+      <div className="grid h-[260px] shrink-0 grid-cols-3 gap-3 px-3 pb-3 grid-rows-[minmax(0,1fr)]">
+        <KeywordsPanel entities={state?.entities ?? []} />
+        <ProfilePanel
+          profile={
+            state?.profile ?? { name: null, facts: [], summary: "" }
+          }
+          profiling={state?.profiling ?? false}
+        />
+        <FaceAnalysisPanel
+          face={
+            state?.face ?? {
+              detected: false,
+              joy: 0,
+              surprise: 0,
+              concern: 0,
+              neutral: 1,
+              dominant_emotion: "neutral",
+              nodding: false,
+              nod_count: 0,
+              expression_changes: [],
+              fps: 0,
+              face_image_base64: "",
+            }
+          }
+        />
       </div>
 
       {state?.error && <ErrorBanner message={state.error} />}
