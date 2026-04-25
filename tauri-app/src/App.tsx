@@ -26,7 +26,7 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <div className="grid flex-1 gap-3 overflow-hidden p-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden p-3 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <TranscriptPanel transcripts={state?.transcripts ?? []} />
         {state ? (
           <SuggestionsPanel state={state} />
@@ -35,7 +35,7 @@ export default function App() {
         )}
       </div>
 
-      <div className="grid h-[180px] shrink-0 grid-cols-3 gap-3 px-3 pb-3">
+      <div className="grid h-[180px] shrink-0 grid-cols-3 gap-3 px-3 pb-3 grid-rows-[minmax(0,1fr)]">
         <PanelPlaceholder label="キーワード" hint="P4 で実装" />
         <PanelPlaceholder label="相手のプロフィール" hint="P4 で実装" />
         <PanelPlaceholder label="表情分析" hint="P4 で実装" />

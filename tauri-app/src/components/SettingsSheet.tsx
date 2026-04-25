@@ -136,7 +136,10 @@ export function SettingsSheet({ open, onClose, state }: Props) {
               <Section title="LLM">
                 <Field label="バックエンド">
                   <Select
-                    value={pick("llm_backend", "ollama")}
+                    value={pick(
+                      "llm_backend",
+                      state?.llm_backend ?? "ollama",
+                    )}
                     options={[
                       { value: "ollama", label: "Ollama" },
                       { value: "llamacpp", label: "llama.cpp" },
@@ -146,7 +149,12 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                 </Field>
                 <Field label="Ollama モデル">
                   <Input
-                    value={pick("ollama_model", "") as string}
+                    value={
+                      pick(
+                        "ollama_model",
+                        state?.ollama_model ?? "",
+                      ) as string
+                    }
                     placeholder="gemma4:e2b"
                     onChange={(e) =>
                       set("ollama_model", e.target.value)
@@ -155,7 +163,12 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                 </Field>
                 <Field label="llama.cpp URL">
                   <Input
-                    value={pick("llamacpp_url", "") as string}
+                    value={
+                      pick(
+                        "llamacpp_url",
+                        state?.llamacpp_url ?? "",
+                      ) as string
+                    }
                     placeholder="http://127.0.0.1:8080"
                     onChange={(e) =>
                       set("llamacpp_url", e.target.value)
@@ -185,7 +198,10 @@ export function SettingsSheet({ open, onClose, state }: Props) {
               <Section title="自動提案">
                 <Field label="デフォルトスタイル">
                   <Select
-                    value={pick("auto_suggest_style", "深堀り")}
+                    value={pick(
+                      "auto_suggest_style",
+                      state?.auto_suggest_style || "深堀り",
+                    )}
                     options={[
                       "深堀り",
                       "褒める",

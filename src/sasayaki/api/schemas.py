@@ -80,6 +80,10 @@ class PipelineStateSchema(_Base):
     turn_taking: TurnTakingStateSchema = TurnTakingStateSchema()
     tts_playing: bool = False
     auto_suggestion_pending: bool = False
+    llm_backend: str = "ollama"
+    ollama_model: str = ""
+    llamacpp_url: str = ""
+    auto_suggest_style: str = ""
 
 
 class SuggestRequest(BaseModel):

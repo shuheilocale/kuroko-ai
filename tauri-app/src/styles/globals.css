@@ -6,30 +6,30 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular,
     "SF Mono", Menlo, Consolas, monospace;
 
-  --color-bg: #0a0a0b;
-  --color-surface: #141416;
-  --color-surface-2: #1c1c20;
-  --color-border: #232328;
-  --color-border-strong: #2e2e34;
+  --color-bg: #17171c;
+  --color-surface: #1f1f26;
+  --color-surface-2: #2a2a33;
+  --color-border: #34343e;
+  --color-border-strong: #43434f;
 
-  --color-fg: #ededef;
-  --color-fg-muted: #8a8a93;
-  --color-fg-subtle: #5c5c64;
+  --color-fg: #f2f2f5;
+  --color-fg-muted: #a9a9b4;
+  --color-fg-subtle: #73737e;
 
-  --color-accent: #7c5cff;
-  --color-accent-hover: #8e74ff;
-  --color-accent-soft: #7c5cff24;
+  --color-accent: #8b75ff;
+  --color-accent-hover: #9d8bff;
+  --color-accent-soft: #8b75ff2e;
 
-  --color-mic: #4a9eff;
-  --color-system: #b98cff;
+  --color-mic: #65aaff;
+  --color-system: #c49dff;
 
   --color-joy: #f5b014;
-  --color-surprise: #14b8a6;
-  --color-concern: #ef4444;
-  --color-neutral: #8a8a93;
+  --color-surprise: #2dd4bf;
+  --color-concern: #f87171;
+  --color-neutral: #a9a9b4;
 
-  --color-danger: #ef4444;
-  --color-success: #14b8a6;
+  --color-danger: #f87171;
+  --color-success: #34d399;
 
   --radius-sm: 4px;
   --radius-md: 6px;

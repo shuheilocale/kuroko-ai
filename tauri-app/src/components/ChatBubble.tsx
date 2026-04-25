@@ -19,8 +19,8 @@ export function ChatBubble({ evt }: { evt: TranscriptEvent }) {
         "max-w-[78%] rounded-md border px-3 py-1.5",
         "text-[13px] leading-relaxed",
         isMic
-          ? "border-[color:var(--color-mic)]/25 bg-[color:var(--color-mic)]/10"
-          : "border-[color:var(--color-system)]/25 bg-[color:var(--color-system)]/10",
+          ? "border-[color:var(--color-mic)]/35 bg-[color:var(--color-mic)]/15"
+          : "border-[color:var(--color-system)]/35 bg-[color:var(--color-system)]/15",
         evt.is_partial && "italic opacity-70",
       )}
     >

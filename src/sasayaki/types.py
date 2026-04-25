@@ -109,3 +109,8 @@ class PipelineState:
     turn_taking: TurnTakingState = field(default_factory=TurnTakingState)
     tts_playing: bool = False
     auto_suggestion_pending: bool = False
+    # Mirrors of Config so the UI can render the live backend wiring.
+    llm_backend: str = "ollama"
+    ollama_model: str = ""
+    llamacpp_url: str = ""
+    auto_suggest_style: str = ""

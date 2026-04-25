@@ -110,6 +110,10 @@ class Pipeline:
                 auto_suggestion_pending=(
                     self.state.auto_suggestion_pending
                 ),
+                llm_backend=self.config.llm_backend,
+                ollama_model=self.config.ollama_model,
+                llamacpp_url=self.config.llamacpp_url,
+                auto_suggest_style=self.config.auto_suggest_style,
             )
 
     def add_manual_keyword(self, term: str):

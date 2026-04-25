@@ -57,6 +57,8 @@ export interface TurnTakingState {
   enabled: boolean;
 }
 
+export type LLMBackend = "ollama" | "llamacpp";
+
 export interface PipelineState {
   transcripts: TranscriptEvent[];
   entities: EntityEvent[];
@@ -76,6 +78,10 @@ export interface PipelineState {
   turn_taking: TurnTakingState;
   tts_playing: boolean;
   auto_suggestion_pending: boolean;
+  llm_backend: LLMBackend;
+  ollama_model: string;
+  llamacpp_url: string;
+  auto_suggest_style: string;
 }
 
 export interface DevicesResponse {

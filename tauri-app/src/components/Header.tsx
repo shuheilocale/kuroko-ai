@@ -59,7 +59,8 @@ export function Header({ state, status, onOpenSettings }: Props) {
           <span className={statusColor}>{status}</span>
         </div>
         <span className="font-mono text-[10px] text-[color:var(--color-fg-subtle)]">
-          ollama:{" "}
+          {state?.llm_backend === "llamacpp" ? "llama.cpp" : "ollama"}
+          :{" "}
           <span
             className={
               state?.ollama_ok
