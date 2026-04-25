@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import sys
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -16,8 +18,11 @@ from .schemas import (
     DeviceInfo,
     DevicesResponse,
     KeywordRequest,
+    MonitorInfo,
+    MonitorsResponse,
     OkResponse,
     PipelineStateSchema,
+    ScreenRegionResponse,
     SettingsPatch,
     SuggestRequest,
 )
@@ -25,6 +30,42 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 STATE_TICK_HZ = 10
+
+
+async def _query_devices_fresh() -> dict[str, list[str]] | None:
+    """Re-query audio devices in a child process to bypass PortAudio's
+    cached device list. Returns None on failure so callers can fall
+    back to the (stale) in-process listing.
+    """
+    code = (
+        "import sounddevice as sd, json, sys\n"
+        "json.dump({\n"
+        "  'input': [d['name'] for d in sd.query_devices()"
+        " if d['max_input_channels'] > 0],\n"
+        "  'output': [d['name'] for d in sd.query_devices()"
+        " if d['max_output_channels'] > 0],\n"
+        "}, sys.stdout)\n"
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=5.0
+        )
+    except (asyncio.TimeoutError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+
 
 # Fields whose change cannot be picked up by mutating Config in place,
 # because some downstream component captured the value at __init__ time
@@ -149,13 +190,27 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.get("/api/devices", response_model=DevicesResponse)
     async def get_devices():
+        fresh = await _query_devices_fresh()
+        if fresh is not None:
+            return DevicesResponse(
+                input_devices=[
+                    DeviceInfo(name=n) for n in fresh["input"]
+                ],
+                output_devices=[
+                    DeviceInfo(name=n) for n in fresh["output"]
+                ],
+            )
+        # Fall back to in-process query — stale, but better than nothing
+        # if the subprocess fails (e.g. python interpreter missing).
         inputs = [DeviceInfo(name=n) for n in list_input_devices()]
         outputs = [
             DeviceInfo(name=d["name"])
             for d in sd.query_devices()
             if d["max_output_channels"] > 0
         ]
-        return DevicesResponse(input_devices=inputs, output_devices=outputs)
+        return DevicesResponse(
+            input_devices=inputs, output_devices=outputs
+        )
 
     @app.post("/api/suggest", response_model=OkResponse)
     async def suggest(req: SuggestRequest):
@@ -176,6 +231,36 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def restart():
         await manager.restart()
         return OkResponse()
+
+    @app.get("/api/monitors", response_model=MonitorsResponse)
+    async def get_monitors():
+        from sasayaki.vision.screen_capture import ScreenCapture
+
+        items = [
+            MonitorInfo(
+                index=m["index"],
+                width=m["width"],
+                height=m["height"],
+            )
+            for m in ScreenCapture.list_monitors()
+        ]
+        return MonitorsResponse(monitors=items)
+
+    @app.post(
+        "/api/screen_region/select",
+        response_model=ScreenRegionResponse,
+    )
+    async def select_screen_region():
+        region = await manager.pipeline.select_screen_region()
+        return ScreenRegionResponse(region=region)
+
+    @app.post(
+        "/api/screen_region/clear",
+        response_model=ScreenRegionResponse,
+    )
+    async def clear_screen_region():
+        manager.pipeline.clear_screen_region()
+        return ScreenRegionResponse(region=(0, 0, 0, 0))
 
     @app.post("/api/settings", response_model=OkResponse)
     async def settings(patch: SettingsPatch):

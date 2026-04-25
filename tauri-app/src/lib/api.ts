@@ -1,4 +1,9 @@
-import type { DevicesResponse, PipelineState } from "./types";
+import type {
+  DevicesResponse,
+  MonitorsResponse,
+  PipelineState,
+  ScreenRegionResponse,
+} from "./types";
 
 const DEFAULT_BASE = "http://127.0.0.1:7861";
 const DEFAULT_WS = "ws://127.0.0.1:7861";
@@ -45,6 +50,11 @@ export const api = {
   restart: () => post<{ ok: boolean }>("/api/restart"),
   settings: (patch: Record<string, unknown>) =>
     post<{ ok: boolean }>("/api/settings", patch),
+  monitors: () => get<MonitorsResponse>("/api/monitors"),
+  selectScreenRegion: () =>
+    post<ScreenRegionResponse>("/api/screen_region/select"),
+  clearScreenRegion: () =>
+    post<ScreenRegionResponse>("/api/screen_region/clear"),
 };
 
 type StateEnvelope = { type: "state"; payload: PipelineState };

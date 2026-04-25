@@ -119,3 +119,6 @@ class PipelineState:
     turn_taking_min_transcripts: int = 3
     llm_context_mode: str = "fixed"
     llm_context_turns: int = 5
+    # (x, y, w, h) — (0,0,0,0) means full monitor.
+    screen_region: tuple[int, int, int, int] = (0, 0, 0, 0)
+    screen_monitor: int = 1

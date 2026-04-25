@@ -87,9 +87,25 @@ export interface PipelineState {
   turn_taking_min_transcripts: number;
   llm_context_mode: ContextMode;
   llm_context_turns: number;
+  screen_region: [number, number, number, number];
+  screen_monitor: number;
 }
 
 export type ContextMode = "fixed" | "since_last_fire";
+
+export interface MonitorInfo {
+  index: number;
+  width: number;
+  height: number;
+}
+
+export interface MonitorsResponse {
+  monitors: MonitorInfo[];
+}
+
+export interface ScreenRegionResponse {
+  region: [number, number, number, number] | null;
+}
 
 export interface DevicesResponse {
   input_devices: { name: string }[];

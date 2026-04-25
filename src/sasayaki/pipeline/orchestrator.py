@@ -49,6 +49,10 @@ class Pipeline:
         self._turn_taking_monitor = None
         self._whisper_playback = None
         self._tts_end_time: float = 0.0
+        # Timestamp of the newest transcript when the last auto-fire
+        # happened. Used to suppress repeat firings during silence: we
+        # only fire if at least one transcript has arrived since.
+        self._last_fire_transcript_ts: float = 0.0
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -123,6 +127,12 @@ class Pipeline:
                 ),
                 llm_context_mode=self.config.llm_context_mode,
                 llm_context_turns=self.config.llm_context_turns,
+                screen_region=(
+                    self._screen_capture.region
+                    if self._screen_capture
+                    else (0, 0, 0, 0)
+                ),
+                screen_monitor=self.config.screen_monitor,
             )
 
     def add_manual_keyword(self, term: str):
@@ -148,12 +158,83 @@ class Pipeline:
         for task in self._tasks:
             self._loop.call_soon_threadsafe(task.cancel)
 
+    def get_screen_region(self) -> tuple[int, int, int, int]:
+        if self._screen_capture is None:
+            return (0, 0, 0, 0)
+        return self._screen_capture.region
+
+    def clear_screen_region(self) -> None:
+        if self._screen_capture is not None:
+            self._screen_capture.region = (0, 0, 0, 0)
+
+    async def select_screen_region(
+        self,
+    ) -> tuple[int, int, int, int] | None:
+        """Drive the native macOS region picker and apply the result."""
+        sc = self._screen_capture
+        if sc is None:
+            return None
+
+        loop = asyncio.get_event_loop()
+
+        def _select() -> tuple[int, int, int, int] | None:
+            import subprocess
+            import tempfile
+            from pathlib import Path
+
+            import cv2
+
+            mon_w, _ = sc.get_monitor_size()
+            tmp_sel = tempfile.mktemp(suffix=".png")
+            tmp_full = tempfile.mktemp(suffix=".png")
+            try:
+                subprocess.run(
+                    ["screencapture", "-x", tmp_full], timeout=10
+                )
+                ret = subprocess.run(
+                    ["screencapture", "-i", "-s", tmp_sel],
+                    timeout=120,
+                )
+                if ret.returncode != 0:
+                    return None
+                p = Path(tmp_sel)
+                if not p.exists() or p.stat().st_size == 0:
+                    return None
+                sel = cv2.imread(tmp_sel)
+                full = cv2.imread(tmp_full)
+                if sel is None or full is None:
+                    return None
+                sh, sw = sel.shape[:2]
+                scale = 2 if full.shape[1] > mon_w * 1.5 else 1
+                res = cv2.matchTemplate(
+                    full, sel, cv2.TM_CCOEFF_NORMED
+                )
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                if max_val > 0.7:
+                    mx, my = max_loc
+                    return (
+                        mx // scale,
+                        my // scale,
+                        sw // scale,
+                        sh // scale,
+                    )
+                return (0, 0, sw // scale, sh // scale)
+            finally:
+                Path(tmp_sel).unlink(missing_ok=True)
+                Path(tmp_full).unlink(missing_ok=True)
+
+        region = await loop.run_in_executor(None, _select)
+        if region is not None:
+            sc.region = region
+        return region
+
     def reset_state(self):
         """Clear all accumulated state for a fresh restart."""
         with self._lock:
             self.state = PipelineState()
         self._llm_task = None
         self._keyword_task = None
+        self._last_fire_transcript_ts = 0.0
         self._keyword_processed_texts = []
         self._profile_task = None
         self._profile_processed_idx = 0
@@ -437,6 +518,11 @@ class Pipeline:
                     )
                     suggesting = self.state.suggesting
                     last_trigger = tt.last_trigger_time
+                    latest_t_ts = (
+                        self.state.transcripts[-1].timestamp
+                        if self.state.transcripts
+                        else 0.0
+                    )
 
                 cooldown = (
                     self.config.turn_taking_cooldown_sec
@@ -444,8 +530,16 @@ class Pipeline:
                 min_t = (
                     self.config.turn_taking_min_transcripts
                 )
+                # Only fire if a new transcript has arrived since the
+                # last fire — otherwise MaAI noise during silence would
+                # retrigger every cooldown_sec with nothing to respond
+                # to.
+                has_new_speech = (
+                    latest_t_ts > self._last_fire_transcript_ts
+                )
                 if (
                     is_turn
+                    and has_new_speech
                     and now - last_trigger > cooldown
                     and not suggesting
                     and n_transcripts >= min_t
@@ -454,6 +548,7 @@ class Pipeline:
                     with self._lock:
                         tt.last_trigger_time = now
                         self.state.suggesting = True
+                    self._last_fire_transcript_ts = latest_t_ts
                     asyncio.create_task(
                         self._auto_suggest_and_whisper()
                     )

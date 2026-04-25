@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
+import { Crop, Maximize2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,11 @@ import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import type { DevicesResponse, PipelineState } from "@/lib/types";
+import type {
+  DevicesResponse,
+  MonitorInfo,
+  PipelineState,
+} from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -20,6 +24,8 @@ type Patch = Record<string, unknown>;
 
 export function SettingsSheet({ open, onClose, state }: Props) {
   const [devices, setDevices] = useState<DevicesResponse | null>(null);
+  const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
+  const [pickingRegion, setPickingRegion] = useState(false);
   const [patch, setPatch] = useState<Patch>({});
   const [applying, setApplying] = useState(false);
 
@@ -28,7 +34,17 @@ export function SettingsSheet({ open, onClose, state }: Props) {
     api
       .devices()
       .then(setDevices)
-      .catch(() => setDevices(null));
+      .catch((e) => {
+        console.error("[settings] devices failed:", e);
+        setDevices(null);
+      });
+    api
+      .monitors()
+      .then((r) => setMonitors(r.monitors))
+      .catch((e) => {
+        console.error("[settings] monitors failed:", e);
+        setMonitors([]);
+      });
   }, [open]);
 
   useEffect(() => {
@@ -148,34 +164,40 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     onChange={(v) => set("llm_backend", v)}
                   />
                 </Field>
-                <Field label="Ollama モデル">
-                  <Input
-                    value={
-                      pick(
-                        "ollama_model",
-                        state?.ollama_model ?? "",
-                      ) as string
-                    }
-                    placeholder="gemma4:e2b"
-                    onChange={(e) =>
-                      set("ollama_model", e.target.value)
-                    }
-                  />
-                </Field>
-                <Field label="llama.cpp URL">
-                  <Input
-                    value={
-                      pick(
-                        "llamacpp_url",
-                        state?.llamacpp_url ?? "",
-                      ) as string
-                    }
-                    placeholder="http://127.0.0.1:8080"
-                    onChange={(e) =>
-                      set("llamacpp_url", e.target.value)
-                    }
-                  />
-                </Field>
+                {pick(
+                  "llm_backend",
+                  state?.llm_backend ?? "ollama",
+                ) === "ollama" ? (
+                  <Field label="モデル">
+                    <Input
+                      value={
+                        pick(
+                          "ollama_model",
+                          state?.ollama_model ?? "",
+                        ) as string
+                      }
+                      placeholder="gemma4:e2b"
+                      onChange={(e) =>
+                        set("ollama_model", e.target.value)
+                      }
+                    />
+                  </Field>
+                ) : (
+                  <Field label="サーバ URL">
+                    <Input
+                      value={
+                        pick(
+                          "llamacpp_url",
+                          state?.llamacpp_url ?? "",
+                        ) as string
+                      }
+                      placeholder="http://127.0.0.1:8080"
+                      onChange={(e) =>
+                        set("llamacpp_url", e.target.value)
+                      }
+                    />
+                  </Field>
+                )}
                 <Field label="コンテキストモード">
                   <Select
                     value={pick(
@@ -300,6 +322,48 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                   onChange={(v) => set("tts_enabled", v)}
                 />
               </Section>
+
+              <Section title="画面 (表情分析)">
+                <Field label="モニター">
+                  <Select
+                    value={String(
+                      pick(
+                        "screen_monitor",
+                        state?.screen_monitor ?? 1,
+                      ),
+                    )}
+                    options={monitors.map((m) => ({
+                      value: String(m.index),
+                      label: `Monitor ${m.index} (${m.width}×${m.height})`,
+                    }))}
+                    onChange={(v) =>
+                      set("screen_monitor", Number(v))
+                    }
+                  />
+                </Field>
+                <RegionRow
+                  region={state?.screen_region}
+                  picking={pickingRegion}
+                  onPickRegion={async () => {
+                    setPickingRegion(true);
+                    try {
+                      const r = await api.selectScreenRegion();
+                      console.info("[region] picked:", r);
+                    } catch (e) {
+                      console.error("[region] pick failed:", e);
+                    } finally {
+                      setPickingRegion(false);
+                    }
+                  }}
+                  onClearRegion={async () => {
+                    try {
+                      await api.clearScreenRegion();
+                    } catch (e) {
+                      console.error("[region] clear failed:", e);
+                    }
+                  }}
+                />
+              </Section>
             </div>
 
             <footer className="flex items-center justify-end gap-2 border-t border-[color:var(--color-border)] p-3">
@@ -396,6 +460,61 @@ function SliderField({
           {hint}
         </span>
       )}
+    </div>
+  );
+}
+
+function RegionRow({
+  region,
+  picking,
+  onPickRegion,
+  onClearRegion,
+}: {
+  region: [number, number, number, number] | undefined;
+  picking: boolean;
+  onPickRegion: () => void;
+  onClearRegion: () => void;
+}) {
+  const isFull =
+    !region || (region[0] === 0 && region[1] === 0 && region[2] === 0);
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] text-[color:var(--color-fg-muted)]">
+          切り出し範囲
+        </span>
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--color-fg)]">
+          {isFull
+            ? "全画面"
+            : `${region![0]},${region![1]} ${region![2]}×${region![3]}`}
+        </span>
+      </div>
+      <div className="flex gap-1.5">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onPickRegion}
+          disabled={picking}
+          className="flex-1"
+        >
+          <Crop className="size-3.5" />
+          {picking ? "ドラッグして選択中…" : "範囲選択"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onClearRegion}
+          disabled={isFull}
+        >
+          <Maximize2 className="size-3.5" />
+          全画面
+        </Button>
+      </div>
+      <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+        相手の顔だけを切り出すと表情検出の精度が上がります
+      </span>
     </div>
   );
 }

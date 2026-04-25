@@ -89,6 +89,22 @@ class PipelineStateSchema(_Base):
     turn_taking_min_transcripts: int = 3
     llm_context_mode: str = "fixed"
     llm_context_turns: int = 5
+    screen_region: tuple[int, int, int, int] = (0, 0, 0, 0)
+    screen_monitor: int = 1
+
+
+class MonitorInfo(BaseModel):
+    index: int
+    width: int
+    height: int
+
+
+class MonitorsResponse(BaseModel):
+    monitors: list[MonitorInfo]
+
+
+class ScreenRegionResponse(BaseModel):
+    region: tuple[int, int, int, int] | None
 
 
 class SuggestRequest(BaseModel):
