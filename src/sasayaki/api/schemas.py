@@ -97,6 +97,9 @@ class PipelineStateSchema(_Base):
     silence_rescue_style: str = "話題転換"
     speculative_pre_fire_enabled: bool = True
     last_whisper_text: str = ""
+    meeting_context: str = ""
+    adapt_style_to_emotion: bool = True
+    concern_alert_enabled: bool = True
 
 
 class MonitorInfo(BaseModel):
@@ -146,6 +149,9 @@ class SettingsPatch(BaseModel):
     silence_rescue_style: str | None = None
     tts_chime_enabled: bool | None = None
     speculative_pre_fire_enabled: bool | None = None
+    meeting_context: str | None = None
+    adapt_style_to_emotion: bool | None = None
+    concern_alert_enabled: bool | None = None
 
 
 class DeviceInfo(BaseModel):

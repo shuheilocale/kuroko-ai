@@ -63,6 +63,10 @@ class Pipeline:
         self._spec_started_mono: float = 0.0
         self._spec_style: str = ""
         self._spec_suggestions: list[str] | None = None
+        # Last dominant emotion seen in the face loop, used to fire a
+        # chime when it transitions into "concern".
+        self._prev_dominant_emotion: str = "neutral"
+        self._last_concern_alert_mono: float = 0.0
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -165,6 +169,13 @@ class Pipeline:
                     self.config.speculative_pre_fire_enabled
                 ),
                 last_whisper_text=self.state.last_whisper_text,
+                meeting_context=self.config.meeting_context,
+                adapt_style_to_emotion=(
+                    self.config.adapt_style_to_emotion
+                ),
+                concern_alert_enabled=(
+                    self.config.concern_alert_enabled
+                ),
             )
 
     def add_manual_keyword(self, term: str):
@@ -692,8 +703,18 @@ class Pipeline:
                     with self._lock:
                         tt.last_trigger_time = now
                         self.state.suggesting = True
+                        # X4: soften auto-style when the partner looks
+                        # concerned. Detection has to be live (not the
+                        # speculative style) so we read state here.
+                        face = self.state.face
                     self._last_fire_transcript_ts = latest_t_ts
                     style = self.config.auto_suggest_style
+                    if (
+                        self.config.adapt_style_to_emotion
+                        and face.detected
+                        and face.dominant_emotion == "concern"
+                    ):
+                        style = "共感"
                     buffered = self._consume_speculative_fire(
                         style
                     )
@@ -984,12 +1005,45 @@ class Pipeline:
                         self.state.face.neutral = (
                             face_state.emotions.neutral
                         )
-                        self.state.face.dominant_emotion = (
-                            face_state.emotions.dominant
+                        new_dominant = face_state.emotions.dominant
+                        prev_dominant = (
+                            self._prev_dominant_emotion
                         )
+                        self.state.face.dominant_emotion = (
+                            new_dominant
+                        )
+                        self._prev_dominant_emotion = new_dominant
                         self.state.face.nodding = (
                             face_state.nodding
                         )
+                        # Y6: alert chime on transition into concern.
+                        if (
+                            self.config.concern_alert_enabled
+                            and new_dominant == "concern"
+                            and prev_dominant != "concern"
+                            and self._whisper_playback is not None
+                        ):
+                            now_mono = time.monotonic()
+                            cooldown = (
+                                self.config
+                                .concern_alert_cooldown_sec
+                            )
+                            if (
+                                now_mono
+                                - self._last_concern_alert_mono
+                                > cooldown
+                            ):
+                                self._last_concern_alert_mono = (
+                                    now_mono
+                                )
+                                asyncio.create_task(
+                                    self._whisper_playback
+                                    .play_alert(
+                                        freq=440.0,
+                                        duration=0.10,
+                                        gain=0.18,
+                                    )
+                                )
                         self.state.face.nod_count = (
                             face_state.nod_count
                         )

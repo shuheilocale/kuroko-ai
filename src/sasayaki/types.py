@@ -132,3 +132,6 @@ class PipelineState:
     # Most recently whispered suggestion. Used as the source for the
     # "replay last whisper" hotkey.
     last_whisper_text: str = ""
+    meeting_context: str = ""
+    adapt_style_to_emotion: bool = True
+    concern_alert_enabled: bool = True

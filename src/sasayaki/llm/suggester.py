@@ -71,6 +71,13 @@ class ResponseSuggester:
         system_prompt = SYSTEM_PROMPT.format(
             style_instruction=style_instruction
         )
+        meeting = (self.config.meeting_context or "").strip()
+        if meeting:
+            system_prompt += (
+                "\n\n【会議の前提情報】\n"
+                f"{meeting}\n"
+                "この前提を踏まえて自然な提案にしてください。"
+            )
 
         context = self._build_context(transcripts)
         prompt = f"【会話の文脈】\n{context}"

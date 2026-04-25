@@ -44,6 +44,10 @@ class Config:
     llm_backend: str = "llamacpp"  # "ollama" or "llamacpp"
     ollama_model: str = "gemma4:e2b"
     llamacpp_url: str = "http://127.0.0.1:8080"
+    # Free-form note about the partner / goal of this meeting that gets
+    # injected into the suggester's system prompt. Set once at the
+    # start of a session to anchor whispers.
+    meeting_context: str = ""
     llm_context_turns: int = 5
     # "fixed": last N turns. "since_last_fire": only transcripts that
     # arrived after the last turn-taking trigger (so each suggestion
@@ -78,6 +82,15 @@ class Config:
     speculative_pre_fire_enabled: bool = True
     speculative_pre_fire_offset: float = 0.2
     speculative_max_age_sec: float = 5.0
+
+    # Soften the auto-fire style when the partner's dominant emotion
+    # has gone "concern" — pivot to 共感 to avoid pouring oil on fire.
+    adapt_style_to_emotion: bool = True
+    # Play a short alert chime when the partner's dominant emotion
+    # transitions to "concern". Heads-up cue so the user can adjust
+    # without waiting for the next whisper cycle.
+    concern_alert_enabled: bool = True
+    concern_alert_cooldown_sec: float = 12.0
 
     # TTS (ささやき)
     tts_enabled: bool = True

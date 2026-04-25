@@ -79,6 +79,46 @@ class WhisperPlayback:
             )
         return self._omnivoice_model
 
+    async def play_alert(
+        self,
+        freq: float = 660.0,
+        duration: float = 0.10,
+        gain: float = 0.20,
+    ) -> None:
+        """Play a one-shot chime through the same device the whisper
+        uses. Non-blocking on the event loop (offloads to a thread).
+
+        Used for emotion alerts and other ambient cues that should
+        share the user's headphones, not leak through the Mac speaker.
+        """
+        if self._playing:
+            # Don't talk over an active whisper.
+            return
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, self._play_alert_blocking, freq, duration, gain
+        )
+
+    def _play_alert_blocking(
+        self, freq: float, duration: float, gain: float
+    ) -> None:
+        play_rate = OMNIVOICE_SAMPLE_RATE
+        if self._device_index is not None:
+            try:
+                dev_info = sd.query_devices(
+                    self._device_index, "output"
+                )
+                play_rate = int(dev_info["default_samplerate"])
+            except Exception:
+                pass
+        chime = _make_chime(
+            play_rate, freq=freq, duration=duration, gain=gain
+        )
+        sd.play(
+            chime, samplerate=play_rate, device=self._device_index
+        )
+        sd.wait()
+
     async def speak(self, text: str) -> bool:
         """Convert text to speech and play it."""
         if self._playing or not text:
@@ -130,11 +170,21 @@ class WhisperPlayback:
                 play_rate = native_rate
 
         if self.config.tts_chime_enabled:
-            chime = _make_chime(play_rate)
-            gap = np.zeros(
+            chime_in = _make_chime(play_rate, freq=880, duration=0.06)
+            gap_pre = np.zeros(
                 int(play_rate * 0.08), dtype=np.float32
             )
-            waveform = np.concatenate([chime, gap, waveform])
+            # Lower-pitched, slightly quieter "done" cue so the user
+            # can tell the whisper is finished without watching the UI.
+            chime_out = _make_chime(
+                play_rate, freq=523, duration=0.05, gain=0.13
+            )
+            gap_post = np.zeros(
+                int(play_rate * 0.05), dtype=np.float32
+            )
+            waveform = np.concatenate(
+                [chime_in, gap_pre, waveform, gap_post, chime_out]
+            )
 
         sd.play(
             waveform,

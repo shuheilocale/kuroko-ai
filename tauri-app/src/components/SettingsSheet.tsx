@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type {
   DevicesResponse,
@@ -134,6 +135,31 @@ export function SettingsSheet({ open, onClose, state }: Props) {
             </header>
 
             <div className="flex-1 space-y-6 overflow-y-auto p-4">
+              <Section title="会議コンテキスト">
+                <Field label="相手 / 目的 / トーン">
+                  <Textarea
+                    value={
+                      pick(
+                        "meeting_context",
+                        state?.meeting_context ?? "",
+                      ) as string
+                    }
+                    placeholder={
+                      "例: 田中さん(取引先 / DX 推進室)\n" +
+                      "目的: 来月の予算合意、雰囲気は固め"
+                    }
+                    rows={4}
+                    onChange={(e) =>
+                      set("meeting_context", e.target.value)
+                    }
+                  />
+                </Field>
+                <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+                  この内容が LLM プロンプトに常駐し、応答候補が
+                  会議の前提に沿ったものになります
+                </span>
+              </Section>
+
               <Section title="オーディオ">
                 <Field label="システム音声">
                   <Select
@@ -323,6 +349,28 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                   )}
                   onChange={(v) =>
                     set("speculative_pre_fire_enabled", v)
+                  }
+                />
+                <ToggleRow
+                  label="表情連動でスタイル切替"
+                  hint="相手が困っている時は自動で「共感」スタイルに上書き"
+                  checked={pick(
+                    "adapt_style_to_emotion",
+                    state?.adapt_style_to_emotion ?? true,
+                  )}
+                  onChange={(v) =>
+                    set("adapt_style_to_emotion", v)
+                  }
+                />
+                <ToggleRow
+                  label="困表情アラート音"
+                  hint="相手が困表情に変わった瞬間に短い警告音を鳴らす"
+                  checked={pick(
+                    "concern_alert_enabled",
+                    state?.concern_alert_enabled ?? true,
+                  )}
+                  onChange={(v) =>
+                    set("concern_alert_enabled", v)
                   }
                 />
               </Section>

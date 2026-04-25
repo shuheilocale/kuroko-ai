@@ -95,6 +95,9 @@ export interface PipelineState {
   silence_rescue_style: string;
   speculative_pre_fire_enabled: boolean;
   last_whisper_text: string;
+  meeting_context: string;
+  adapt_style_to_emotion: boolean;
+  concern_alert_enabled: boolean;
 }
 
 export type ContextMode = "fixed" | "since_last_fire";
