@@ -84,6 +84,9 @@ class PipelineStateSchema(_Base):
     ollama_model: str = ""
     llamacpp_url: str = ""
     auto_suggest_style: str = ""
+    turn_taking_threshold: float = 0.6
+    turn_taking_cooldown_sec: float = 8.0
+    turn_taking_min_transcripts: int = 3
 
 
 class SuggestRequest(BaseModel):
@@ -109,6 +112,9 @@ class SettingsPatch(BaseModel):
     maai_enabled: bool | None = None
     tts_enabled: bool | None = None
     auto_suggest_style: str | None = None
+    turn_taking_threshold: float | None = None
+    turn_taking_cooldown_sec: float | None = None
+    turn_taking_min_transcripts: int | None = None
 
 
 class DeviceInfo(BaseModel):

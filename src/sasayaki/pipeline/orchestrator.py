@@ -114,6 +114,13 @@ class Pipeline:
                 ollama_model=self.config.ollama_model,
                 llamacpp_url=self.config.llamacpp_url,
                 auto_suggest_style=self.config.auto_suggest_style,
+                turn_taking_threshold=self.config.turn_taking_threshold,
+                turn_taking_cooldown_sec=(
+                    self.config.turn_taking_cooldown_sec
+                ),
+                turn_taking_min_transcripts=(
+                    self.config.turn_taking_min_transcripts
+                ),
             )
 
     def add_manual_keyword(self, term: str):

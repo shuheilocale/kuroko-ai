@@ -21,6 +21,17 @@ export default function App() {
     return connectStateSocket({ onState: setState, onStatus: setStatus });
   }, [setState, setStatus]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <main className="flex h-full flex-col bg-[color:var(--color-bg)]">
       <Header

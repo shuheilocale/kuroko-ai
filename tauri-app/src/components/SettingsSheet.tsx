@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import type { DevicesResponse, PipelineState } from "@/lib/types";
@@ -177,26 +178,60 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                 </Field>
               </Section>
 
-              <Section title="機能">
+              <Section title="ターンテイキング">
                 <ToggleRow
-                  label="ターンテイキング (MaAI)"
-                  hint="話者交替を予測して自動提案"
+                  label="自動検出 (MaAI)"
+                  hint="話者交替を予測して自動で提案を発火"
                   checked={pick(
                     "maai_enabled",
                     state?.turn_taking.enabled ?? true,
                   )}
                   onChange={(v) => set("maai_enabled", v)}
                 />
-                <ToggleRow
-                  label="TTS ウィスパー"
-                  hint="提案を耳元に読み上げ"
-                  checked={pick("tts_enabled", true)}
-                  onChange={(v) => set("tts_enabled", v)}
+                <SliderField
+                  label="発火しきい値"
+                  hint="p_now がこの値を超えたら応答候補を生成"
+                  value={pick(
+                    "turn_taking_threshold",
+                    state?.turn_taking_threshold ?? 0.6,
+                  )}
+                  min={0.3}
+                  max={0.9}
+                  step={0.05}
+                  format={(v) => v.toFixed(2)}
+                  onChange={(v) => set("turn_taking_threshold", v)}
                 />
-              </Section>
-
-              <Section title="自動提案">
-                <Field label="デフォルトスタイル">
+                <SliderField
+                  label="クールダウン (秒)"
+                  hint="連続発火の抑制間隔"
+                  value={pick(
+                    "turn_taking_cooldown_sec",
+                    state?.turn_taking_cooldown_sec ?? 8.0,
+                  )}
+                  min={2}
+                  max={20}
+                  step={1}
+                  format={(v) => `${v.toFixed(0)}s`}
+                  onChange={(v) =>
+                    set("turn_taking_cooldown_sec", v)
+                  }
+                />
+                <SliderField
+                  label="最小文字起こし件数"
+                  hint="会話開始直後の誤爆を防止"
+                  value={pick(
+                    "turn_taking_min_transcripts",
+                    state?.turn_taking_min_transcripts ?? 3,
+                  )}
+                  min={1}
+                  max={10}
+                  step={1}
+                  format={(v) => `${v.toFixed(0)}`}
+                  onChange={(v) =>
+                    set("turn_taking_min_transcripts", Math.round(v))
+                  }
+                />
+                <Field label="自動発火時のスタイル">
                   <Select
                     value={pick(
                       "auto_suggest_style",
@@ -219,6 +254,15 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     onChange={(v) => set("auto_suggest_style", v)}
                   />
                 </Field>
+              </Section>
+
+              <Section title="TTS">
+                <ToggleRow
+                  label="ウィスパー再生"
+                  hint="提案を耳元に読み上げ"
+                  checked={pick("tts_enabled", true)}
+                  onChange={(v) => set("tts_enabled", v)}
+                />
               </Section>
             </div>
 
@@ -272,6 +316,51 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+function SliderField({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] text-[color:var(--color-fg-muted)]">
+          {label}
+        </span>
+        <span className="font-mono text-[11px] tabular-nums text-[color:var(--color-fg)]">
+          {format(value)}
+        </span>
+      </div>
+      <Slider
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={onChange}
+      />
+      {hint && (
+        <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+          {hint}
+        </span>
+      )}
+    </div>
   );
 }
 

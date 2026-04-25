@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Search } from "lucide-react";
 
 import { JumpToLatest } from "@/components/JumpToLatest";
@@ -15,7 +15,20 @@ interface Props {
 export function KeywordsPanel({ entities }: Props) {
   const [term, setTerm] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const last = entities[entities.length - 1];
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const { ref, stuck, onScroll, jumpToBottom } = useStickToBottom([
     entities.length,
     last?.definition,
@@ -55,9 +68,10 @@ export function KeywordsPanel({ entities }: Props) {
         className="flex items-center gap-1.5 border-b border-[color:var(--color-border)] px-3 py-2"
       >
         <Input
+          ref={inputRef}
           value={term}
           onChange={(e) => setTerm(e.target.value)}
-          placeholder="調べたい用語"
+          placeholder="調べたい用語  (⌘K)"
           disabled={submitting}
           className="flex-1"
         />

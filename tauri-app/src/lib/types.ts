@@ -82,6 +82,9 @@ export interface PipelineState {
   ollama_model: string;
   llamacpp_url: string;
   auto_suggest_style: string;
+  turn_taking_threshold: number;
+  turn_taking_cooldown_sec: number;
+  turn_taking_min_transcripts: number;
 }
 
 export interface DevicesResponse {
