@@ -10,7 +10,21 @@
         background: #1f1f26;
         color: #f5f5f8;
       }
+      html[data-theme="light"],
+      html[data-theme="light"] body {
+        background: #f5ede0;
+        color: #2a1f18;
+      }
     </style>
+    <script>
+      // Pick up the saved theme before paint to avoid a dark→light flash.
+      try {
+        var t = localStorage.getItem("sasayaki-theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    </script>
   </head>
 
   <body>

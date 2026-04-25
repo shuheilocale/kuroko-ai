@@ -9,6 +9,7 @@ import { SuggestionsPanel } from "@/components/SuggestionsPanel";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
 import { api, connectStateSocket } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
+import { useTheme } from "@/lib/useTheme";
 
 export default function App() {
   const state = useAppStore((s) => s.state);
@@ -16,6 +17,7 @@ export default function App() {
   const setState = useAppStore((s) => s.setState);
   const setStatus = useAppStore((s) => s.setStatus);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     return connectStateSocket({ onState: setState, onStatus: setStatus });
@@ -26,6 +28,16 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
+        return;
+      }
+      // Cmd/Ctrl + Shift + L → toggle light/dark theme.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "l"
+      ) {
+        e.preventDefault();
+        toggleTheme();
         return;
       }
       // Space: replay last whisper. Skip while typing or holding mods.
@@ -46,7 +58,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [settingsOpen]);
+  }, [settingsOpen, toggleTheme]);
 
   return (
     <main className="flex h-full flex-col bg-[color:var(--color-bg)]">

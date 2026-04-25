@@ -36,6 +36,35 @@
   --radius-lg: 8px;
 }
 
+/* Presentation / projector theme: warm parchment + wine red.
+   Optimised for projector contrast and audience legibility. */
+[data-theme="light"] {
+  --color-bg: #f5ede0;
+  --color-surface: #ffffff;
+  --color-surface-2: #fbf5ea;
+  --color-border: #e0d6c1;
+  --color-border-strong: #c4b89a;
+
+  --color-fg: #2a1f18;
+  --color-fg-muted: #6f635a;
+  --color-fg-subtle: #9a8e83;
+
+  --color-accent: #7b1f1f;
+  --color-accent-hover: #9a2828;
+  --color-accent-soft: #7b1f1f1f;
+
+  --color-mic: #1f5478;
+  --color-system: #7b1f1f;
+
+  --color-joy: #c68a1b;
+  --color-surprise: #0f7b7a;
+  --color-concern: #a82a2a;
+  --color-neutral: #7c6f60;
+
+  --color-danger: #a82a2a;
+  --color-success: #3e7e4d;
+}
+
 html,
 body,
 #root {

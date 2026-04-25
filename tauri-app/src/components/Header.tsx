@@ -1,10 +1,18 @@
-import { Activity, Circle, Hourglass, Settings } from "lucide-react";
+import {
+  Activity,
+  Circle,
+  Hourglass,
+  Moon,
+  Settings,
+  Sun,
+} from "lucide-react";
 
 import { AudioMeter } from "@/components/AudioMeter";
 import { TurnTakingGauge } from "@/components/TurnTakingGauge";
 import { Button } from "@/components/ui/button";
 import type { StateSocketStatus } from "@/lib/api";
 import type { PipelineState } from "@/lib/types";
+import { useTheme } from "@/lib/useTheme";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -14,6 +22,7 @@ interface Props {
 }
 
 export function Header({ state, status, onOpenSettings }: Props) {
+  const { theme, toggle: toggleTheme } = useTheme();
   const statusColor =
     status === "open"
       ? "text-[color:var(--color-success)]"
@@ -76,6 +85,27 @@ export function Header({ state, status, onOpenSettings }: Props) {
             {state?.ollama_ok ? "ok" : "down"}
           </span>
         </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleTheme}
+          aria-label={
+            theme === "dark"
+              ? "プレゼンテーマに切替"
+              : "ダークテーマに切替"
+          }
+          title={
+            theme === "dark"
+              ? "Light (presentation) ⌘⇧L"
+              : "Dark ⌘⇧L"
+          }
+        >
+          {theme === "dark" ? (
+            <Sun className="size-4" />
+          ) : (
+            <Moon className="size-4" />
+          )}
+        </Button>
         <Button
           variant="ghost"
           size="icon"
