@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 def _transcribe_sync(audio: np.ndarray, model: str, language: str) -> str:
     """Synchronous transcription using mlx-whisper. Runs in executor."""
-    import mlx_whisper
+    import mlx_whisper  # noqa: F401  (import first so the patch can find it)
+
+    from sasayaki.asr.mlx_whisper_patch import apply as _apply_sdpa_patch
+
+    _apply_sdpa_patch()
 
     result = mlx_whisper.transcribe(
         audio,
