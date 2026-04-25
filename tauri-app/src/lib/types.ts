@@ -85,7 +85,11 @@ export interface PipelineState {
   turn_taking_threshold: number;
   turn_taking_cooldown_sec: number;
   turn_taking_min_transcripts: number;
+  llm_context_mode: ContextMode;
+  llm_context_turns: number;
 }
+
+export type ContextMode = "fixed" | "since_last_fire";
 
 export interface DevicesResponse {
   input_devices: { name: string }[];

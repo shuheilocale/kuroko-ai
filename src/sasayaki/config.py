@@ -45,6 +45,10 @@ class Config:
     ollama_model: str = "gemma4:e2b"
     llamacpp_url: str = "http://127.0.0.1:8080"
     llm_context_turns: int = 5
+    # "fixed": last N turns. "since_last_fire": only transcripts that
+    # arrived after the last turn-taking trigger (so each suggestion
+    # uses just the new exchange).
+    llm_context_mode: str = "fixed"
     llm_debounce_sec: float = 1.5
 
     # Vision

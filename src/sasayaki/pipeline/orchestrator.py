@@ -121,6 +121,8 @@ class Pipeline:
                 turn_taking_min_transcripts=(
                     self.config.turn_taking_min_transcripts
                 ),
+                llm_context_mode=self.config.llm_context_mode,
+                llm_context_turns=self.config.llm_context_turns,
             )
 
     def add_manual_keyword(self, term: str):
@@ -460,6 +462,26 @@ class Pipeline:
             feed_system(), feed_mic(), poll_predictions()
         )
 
+    def _select_context_transcripts(
+        self, transcripts: list[TranscriptEvent]
+    ) -> list[TranscriptEvent]:
+        """Trim transcripts based on llm_context_mode.
+
+        "fixed": pass-through; the suggester will tail by
+            llm_context_turns. "since_last_fire": only transcripts
+            after the last turn-taking trigger so each suggestion is
+            scoped to the new exchange.
+        """
+        if self.config.llm_context_mode != "since_last_fire":
+            return transcripts
+        last_mono = self.state.turn_taking.last_trigger_time
+        if last_mono <= 0:
+            return transcripts
+        # last_trigger_time is monotonic; transcript timestamps are
+        # epoch wall-clock. Convert via the current offset.
+        cutoff = time.time() - (time.monotonic() - last_mono)
+        return [t for t in transcripts if t.timestamp > cutoff]
+
     async def _auto_suggest_and_whisper(self):
         """Auto-generate a suggestion and TTS whisper it."""
         style = self.config.auto_suggest_style
@@ -469,6 +491,7 @@ class Pipeline:
             self.state.auto_suggestion_pending = True
             transcripts = list(self.state.transcripts)
 
+        transcripts = self._select_context_transcripts(transcripts)
         try:
             suggestions = await self._suggester.suggest(
                 transcripts, style
@@ -817,6 +840,7 @@ class Pipeline:
             self.state.suggestion_style = style
             transcripts = list(self.state.transcripts)
 
+        transcripts = self._select_context_transcripts(transcripts)
         try:
             suggestions = await self._suggester.suggest(transcripts, style)
             if suggestions:

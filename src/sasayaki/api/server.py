@@ -26,6 +26,37 @@ logger = logging.getLogger(__name__)
 
 STATE_TICK_HZ = 10
 
+# Fields whose change cannot be picked up by mutating Config in place,
+# because some downstream component captured the value at __init__ time
+# (audio devices, ML model handles, LLM client, TTS playback).
+COLD_FIELDS: frozenset[str] = frozenset(
+    {
+        "system_audio_device",
+        "mic_device",
+        "sample_rate",
+        "whisper_model",
+        "whisper_language",
+        "vad_threshold",
+        "vad_min_silence_ms",
+        "vad_speech_pad_ms",
+        "vad_partial_flush_sec",
+        "screen_monitor",
+        "maai_enabled",
+        "maai_frame_rate",
+        "maai_device",
+        "tts_enabled",
+        "tts_backend",
+        "tts_omnivoice_model",
+        "tts_omnivoice_instruct",
+        "tts_omnivoice_speed",
+        "tts_output_device",
+        "tts_volume",
+        "llm_backend",
+        "ollama_model",
+        "llamacpp_url",
+    }
+)
+
 
 class PipelineManager:
     """Owns the Pipeline lifecycle on a dedicated thread.
@@ -149,9 +180,20 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.post("/api/settings", response_model=OkResponse)
     async def settings(patch: SettingsPatch):
         changed = manager.apply_settings(patch)
-        if changed:
-            logger.info("Settings changed: %s -> restarting pipeline", changed)
+        if not changed:
+            return OkResponse()
+        cold = [f for f in changed if f in COLD_FIELDS]
+        if cold:
+            logger.info(
+                "Cold settings changed: %s -> restarting pipeline",
+                cold,
+            )
             await manager.restart()
+        else:
+            logger.info(
+                "Hot settings changed: %s -> applied without restart",
+                changed,
+            )
         return OkResponse()
 
     @app.websocket("/ws/state")

@@ -87,6 +87,8 @@ class PipelineStateSchema(_Base):
     turn_taking_threshold: float = 0.6
     turn_taking_cooldown_sec: float = 8.0
     turn_taking_min_transcripts: int = 3
+    llm_context_mode: str = "fixed"
+    llm_context_turns: int = 5
 
 
 class SuggestRequest(BaseModel):
@@ -115,6 +117,8 @@ class SettingsPatch(BaseModel):
     turn_taking_threshold: float | None = None
     turn_taking_cooldown_sec: float | None = None
     turn_taking_min_transcripts: int | None = None
+    llm_context_mode: Literal["fixed", "since_last_fire"] | None = None
+    llm_context_turns: int | None = None
 
 
 class DeviceInfo(BaseModel):

@@ -176,6 +176,42 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     }
                   />
                 </Field>
+                <Field label="コンテキストモード">
+                  <Select
+                    value={pick(
+                      "llm_context_mode",
+                      state?.llm_context_mode ?? "fixed",
+                    )}
+                    options={[
+                      { value: "fixed", label: "固定 (直近 N 件)" },
+                      {
+                        value: "since_last_fire",
+                        label: "動的 (前回発火以降)",
+                      },
+                    ]}
+                    onChange={(v) => set("llm_context_mode", v)}
+                  />
+                </Field>
+                {pick(
+                  "llm_context_mode",
+                  state?.llm_context_mode ?? "fixed",
+                ) === "fixed" && (
+                  <SliderField
+                    label="コンテキスト件数"
+                    hint="直近 N ターンを LLM に渡す"
+                    value={pick(
+                      "llm_context_turns",
+                      state?.llm_context_turns ?? 5,
+                    )}
+                    min={2}
+                    max={15}
+                    step={1}
+                    format={(v) => `${v.toFixed(0)}`}
+                    onChange={(v) =>
+                      set("llm_context_turns", Math.round(v))
+                    }
+                  />
+                )}
               </Section>
 
               <Section title="ターンテイキング">
