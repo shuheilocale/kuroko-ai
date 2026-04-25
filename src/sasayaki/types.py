@@ -122,3 +122,9 @@ class PipelineState:
     # (x, y, w, h) — (0,0,0,0) means full monitor.
     screen_region: tuple[int, int, int, int] = (0, 0, 0, 0)
     screen_monitor: int = 1
+    # Seconds since the most recent transcript arrived. Surfaced for the
+    # header "沈黙 4.2s" indicator. 0 if no transcripts yet.
+    silence_seconds: float = 0.0
+    silence_rescue_enabled: bool = True
+    silence_rescue_seconds: float = 6.0
+    silence_rescue_style: str = "話題転換"

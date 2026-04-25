@@ -11,6 +11,27 @@ logger = logging.getLogger(__name__)
 OMNIVOICE_SAMPLE_RATE = 24000
 
 
+def _make_chime(
+    sample_rate: int,
+    freq: float = 880.0,
+    duration: float = 0.06,
+    gain: float = 0.18,
+) -> np.ndarray:
+    """Short cosine-windowed sine 'ting' to alert the user before a
+    whisper. Same sample rate as the speech that follows so we can
+    concatenate without resampling glitches."""
+    n = int(sample_rate * duration)
+    t = np.arange(n, dtype=np.float32) / sample_rate
+    wave = np.sin(2.0 * np.pi * freq * t)
+    fade_n = max(1, int(sample_rate * 0.01))
+    if 2 * fade_n < n:
+        env = np.ones(n, dtype=np.float32)
+        env[:fade_n] = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+        env[-fade_n:] = np.linspace(1.0, 0.0, fade_n, dtype=np.float32)
+        wave *= env
+    return (wave * gain).astype(np.float32)
+
+
 class WhisperPlayback:
     """Plays TTS audio through a specific output device."""
 
@@ -107,6 +128,13 @@ class WhisperPlayback:
                     native_rate,
                 )
                 play_rate = native_rate
+
+        if self.config.tts_chime_enabled:
+            chime = _make_chime(play_rate)
+            gap = np.zeros(
+                int(play_rate * 0.08), dtype=np.float32
+            )
+            waveform = np.concatenate([chime, gap, waveform])
 
         sd.play(
             waveform,

@@ -53,6 +53,9 @@ class Pipeline:
         # happened. Used to suppress repeat firings during silence: we
         # only fire if at least one transcript has arrived since.
         self._last_fire_transcript_ts: float = 0.0
+        # Monotonic time of the last silence-rescue trigger so the loop
+        # doesn't re-fire while the silence persists.
+        self._last_silence_rescue_mono: float = 0.0
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -133,6 +136,24 @@ class Pipeline:
                     else (0, 0, 0, 0)
                 ),
                 screen_monitor=self.config.screen_monitor,
+                silence_seconds=(
+                    max(
+                        0.0,
+                        time.time()
+                        - self.state.transcripts[-1].timestamp,
+                    )
+                    if self.state.transcripts
+                    else 0.0
+                ),
+                silence_rescue_enabled=(
+                    self.config.silence_rescue_enabled
+                ),
+                silence_rescue_seconds=(
+                    self.config.silence_rescue_seconds
+                ),
+                silence_rescue_style=(
+                    self.config.silence_rescue_style
+                ),
             )
 
     def add_manual_keyword(self, term: str):
@@ -409,6 +430,10 @@ class Pipeline:
                 self._face_analysis_loop(),
                 name="face_analysis",
             ),
+            asyncio.create_task(
+                self._silence_rescue_loop(),
+                name="silence_rescue",
+            ),
         ]
 
         # MaAI turn-taking tasks
@@ -456,6 +481,56 @@ class Pipeline:
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
+
+    async def _silence_rescue_loop(self):
+        """Fire a topic-shifter when nobody has spoken for a while.
+
+        Bypasses the usual turn-taking trigger because by definition no
+        new transcript has arrived. Has its own cooldown so a single
+        silent stretch doesn't loop the whisper.
+        """
+        while True:
+            await asyncio.sleep(1.0)
+            if not self.config.silence_rescue_enabled:
+                continue
+            now = time.monotonic()
+            with self._lock:
+                if not self.state.transcripts:
+                    continue
+                if self.state.suggesting:
+                    continue
+                latest_t_ts = self.state.transcripts[-1].timestamp
+                last_fire_mono = (
+                    self.state.turn_taking.last_trigger_time
+                )
+                n_transcripts = len(self.state.transcripts)
+                ollama_ok = self.state.ollama_ok
+
+            min_t = self.config.turn_taking_min_transcripts
+            if n_transcripts < min_t or not ollama_ok:
+                continue
+            silence_for = time.time() - latest_t_ts
+            if silence_for < self.config.silence_rescue_seconds:
+                continue
+            cooldown = self.config.turn_taking_cooldown_sec
+            if now - last_fire_mono < cooldown:
+                continue
+            if (
+                now - self._last_silence_rescue_mono < cooldown
+            ):
+                continue
+
+            self._last_silence_rescue_mono = now
+            with self._lock:
+                self.state.turn_taking.last_trigger_time = now
+                self.state.suggesting = True
+            self._last_fire_transcript_ts = latest_t_ts
+            asyncio.create_task(
+                self._auto_suggest_and_whisper(
+                    style=self.config.silence_rescue_style,
+                    label_prefix="沈黙",
+                )
+            )
 
     async def _tee_queue(self, source, dest1, dest2):
         """Copy each item from source to both dest1 and dest2."""
@@ -577,12 +652,17 @@ class Pipeline:
         cutoff = time.time() - (time.monotonic() - last_mono)
         return [t for t in transcripts if t.timestamp > cutoff]
 
-    async def _auto_suggest_and_whisper(self):
+    async def _auto_suggest_and_whisper(
+        self,
+        style: str | None = None,
+        label_prefix: str = "自動",
+    ):
         """Auto-generate a suggestion and TTS whisper it."""
-        style = self.config.auto_suggest_style
+        if style is None:
+            style = self.config.auto_suggest_style
         with self._lock:
             self.state.suggesting = True
-            self.state.suggestion_style = f"[自動] {style}"
+            self.state.suggestion_style = f"[{label_prefix}] {style}"
             self.state.auto_suggestion_pending = True
             transcripts = list(self.state.transcripts)
 

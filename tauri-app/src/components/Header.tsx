@@ -1,4 +1,4 @@
-import { Activity, Circle, Settings } from "lucide-react";
+import { Activity, Circle, Hourglass, Settings } from "lucide-react";
 
 import { AudioMeter } from "@/components/AudioMeter";
 import { TurnTakingGauge } from "@/components/TurnTakingGauge";
@@ -48,6 +48,11 @@ export function Header({ state, status, onOpenSettings }: Props) {
           color="var(--color-system)"
         />
         <TurnTakingGauge turn={state?.turn_taking} />
+        <SilenceIndicator
+          seconds={state?.silence_seconds ?? 0}
+          threshold={state?.silence_rescue_seconds ?? 6}
+          enabled={state?.silence_rescue_enabled ?? false}
+        />
       </div>
 
       <div className="ml-auto flex items-center gap-3">
@@ -81,5 +86,33 @@ export function Header({ state, status, onOpenSettings }: Props) {
         </Button>
       </div>
     </header>
+  );
+}
+
+function SilenceIndicator({
+  seconds,
+  threshold,
+  enabled,
+}: {
+  seconds: number;
+  threshold: number;
+  enabled: boolean;
+}) {
+  if (!enabled || seconds < 1.5) return null;
+  const hot = seconds >= threshold;
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1 font-mono text-[10px] tabular-nums",
+        "uppercase tracking-wider",
+        hot
+          ? "text-[color:var(--color-accent)]"
+          : "text-[color:var(--color-fg-muted)]",
+      )}
+      title="沈黙が続くとレスキューが発火します"
+    >
+      <Hourglass className="size-3" />
+      {seconds.toFixed(1)}s
+    </span>
   );
 }

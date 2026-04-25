@@ -91,6 +91,10 @@ class PipelineStateSchema(_Base):
     llm_context_turns: int = 5
     screen_region: tuple[int, int, int, int] = (0, 0, 0, 0)
     screen_monitor: int = 1
+    silence_seconds: float = 0.0
+    silence_rescue_enabled: bool = True
+    silence_rescue_seconds: float = 6.0
+    silence_rescue_style: str = "話題転換"
 
 
 class MonitorInfo(BaseModel):
@@ -135,6 +139,10 @@ class SettingsPatch(BaseModel):
     turn_taking_min_transcripts: int | None = None
     llm_context_mode: Literal["fixed", "since_last_fire"] | None = None
     llm_context_turns: int | None = None
+    silence_rescue_enabled: bool | None = None
+    silence_rescue_seconds: float | None = None
+    silence_rescue_style: str | None = None
+    tts_chime_enabled: bool | None = None
 
 
 class DeviceInfo(BaseModel):

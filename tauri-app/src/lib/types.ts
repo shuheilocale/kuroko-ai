@@ -89,6 +89,10 @@ export interface PipelineState {
   llm_context_turns: number;
   screen_region: [number, number, number, number];
   screen_monitor: number;
+  silence_seconds: number;
+  silence_rescue_enabled: boolean;
+  silence_rescue_seconds: number;
+  silence_rescue_style: string;
 }
 
 export type ContextMode = "fixed" | "since_last_fire";

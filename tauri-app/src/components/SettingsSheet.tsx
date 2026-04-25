@@ -22,6 +22,21 @@ interface Props {
 
 type Patch = Record<string, unknown>;
 
+const STYLE_OPTIONS = [
+  "深堀り",
+  "褒める",
+  "批判的",
+  "矛盾指摘",
+  "よいしょ",
+  "共感",
+  "まとめる",
+  "話題転換",
+  "具体例を求める",
+  "ボケる",
+  "謝罪",
+  "知識でマウント",
+];
+
 export function SettingsSheet({ open, onClose, state }: Props) {
   const [devices, setDevices] = useState<DevicesResponse | null>(null);
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
@@ -295,21 +310,49 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                       "auto_suggest_style",
                       state?.auto_suggest_style || "深堀り",
                     )}
-                    options={[
-                      "深堀り",
-                      "褒める",
-                      "批判的",
-                      "矛盾指摘",
-                      "よいしょ",
-                      "共感",
-                      "まとめる",
-                      "話題転換",
-                      "具体例を求める",
-                      "ボケる",
-                      "謝罪",
-                      "知識でマウント",
-                    ]}
+                    options={STYLE_OPTIONS}
                     onChange={(v) => set("auto_suggest_style", v)}
+                  />
+                </Field>
+              </Section>
+
+              <Section title="沈黙レスキュー">
+                <ToggleRow
+                  label="沈黙時に自動発火"
+                  hint="しばらく誰も話さないとき、別スタイルで囁きを出す"
+                  checked={pick(
+                    "silence_rescue_enabled",
+                    state?.silence_rescue_enabled ?? true,
+                  )}
+                  onChange={(v) =>
+                    set("silence_rescue_enabled", v)
+                  }
+                />
+                <SliderField
+                  label="沈黙の長さ閾値 (秒)"
+                  hint="この時間黙ったらレスキュー発火"
+                  value={pick(
+                    "silence_rescue_seconds",
+                    state?.silence_rescue_seconds ?? 6.0,
+                  )}
+                  min={3}
+                  max={15}
+                  step={0.5}
+                  format={(v) => `${v.toFixed(1)}s`}
+                  onChange={(v) =>
+                    set("silence_rescue_seconds", v)
+                  }
+                />
+                <Field label="沈黙時のスタイル">
+                  <Select
+                    value={pick(
+                      "silence_rescue_style",
+                      state?.silence_rescue_style || "話題転換",
+                    )}
+                    options={STYLE_OPTIONS}
+                    onChange={(v) =>
+                      set("silence_rescue_style", v)
+                    }
                   />
                 </Field>
               </Section>
@@ -320,6 +363,12 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                   hint="提案を耳元に読み上げ"
                   checked={pick("tts_enabled", true)}
                   onChange={(v) => set("tts_enabled", v)}
+                />
+                <ToggleRow
+                  label="開始キュー音"
+                  hint="囁きの直前に短いベルで注意喚起"
+                  checked={pick("tts_chime_enabled", true)}
+                  onChange={(v) => set("tts_chime_enabled", v)}
                 />
               </Section>
 

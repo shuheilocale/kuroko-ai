@@ -67,6 +67,11 @@ class Config:
     turn_taking_min_transcripts: int = 3
     auto_suggest_style: str = "深堀り"
 
+    # Silence rescue: fire a topic-shifter when nobody speaks for a while.
+    silence_rescue_enabled: bool = True
+    silence_rescue_seconds: float = 6.0
+    silence_rescue_style: str = "話題転換"
+
     # TTS (ささやき)
     tts_enabled: bool = True
     tts_backend: str = "omnivoice"
@@ -77,6 +82,9 @@ class Config:
     tts_omnivoice_speed: float = 1.1
     tts_output_device: str = ""
     tts_volume: float = 0.6
+    # Short attention-grabbing chime mixed in just before each whisper
+    # so the user's ear catches the "incoming" cue while in conversation.
+    tts_chime_enabled: bool = True
 
     # UI
     ui_max_transcript_messages: int = 100
