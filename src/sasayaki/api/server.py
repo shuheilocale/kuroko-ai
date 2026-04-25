@@ -104,8 +104,7 @@ class PipelineManager:
 
     The Pipeline performs blocking ML work (model loading, ASR inference,
     face analysis) that would starve the FastAPI event loop if run in
-    process. Mirrors the threading pattern used by the legacy NiceGUI
-    entry point.
+    process — so it gets its own thread with its own asyncio loop.
     """
 
     def __init__(self, config: Config):
