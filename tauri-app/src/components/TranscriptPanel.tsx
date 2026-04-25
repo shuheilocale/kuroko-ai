@@ -1,46 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
-
 import { ChatBubble } from "@/components/ChatBubble";
+import { JumpToLatest } from "@/components/JumpToLatest";
 import type { TranscriptEvent } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 
 interface Props {
   transcripts: TranscriptEvent[];
 }
 
-const STICKY_THRESHOLD_PX = 80;
-
 export function TranscriptPanel({ transcripts }: Props) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // User "owns" the scroll position once they scroll up meaningfully.
-  const [stickToBottom, setStickToBottom] = useState(true);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distanceFromBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight;
-    setStickToBottom(distanceFromBottom < STICKY_THRESHOLD_PX);
-  };
-
-  useEffect(() => {
-    if (!stickToBottom) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [
-    stickToBottom,
+  const last = transcripts[transcripts.length - 1];
+  const { ref, stuck, onScroll, jumpToBottom } = useStickToBottom([
     transcripts.length,
-    transcripts[transcripts.length - 1]?.text,
+    last?.text,
+    last?.is_partial,
   ]);
-
-  const scrollToBottom = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    setStickToBottom(true);
-  };
 
   return (
     <section className="relative flex h-full min-h-0 flex-col rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
@@ -53,7 +26,7 @@ export function TranscriptPanel({ transcripts }: Props) {
         </span>
       </header>
       <div
-        ref={scrollRef}
+        ref={ref}
         onScroll={onScroll}
         className="flex-1 min-h-0 space-y-1.5 overflow-y-auto overscroll-contain px-3 py-3"
       >
@@ -71,22 +44,8 @@ export function TranscriptPanel({ transcripts }: Props) {
         )}
       </div>
 
-      {!stickToBottom && transcripts.length > 0 && (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className={cn(
-            "absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5",
-            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
-            "border-[color:var(--color-accent)]",
-            "bg-[color:var(--color-accent)] text-white",
-            "shadow-lg hover:bg-[color:var(--color-accent-hover)]",
-            "transition-colors",
-          )}
-        >
-          <ArrowDown className="size-3" />
-          最新へ
-        </button>
+      {!stuck && transcripts.length > 0 && (
+        <JumpToLatest onClick={jumpToBottom} />
       )}
     </section>
   );

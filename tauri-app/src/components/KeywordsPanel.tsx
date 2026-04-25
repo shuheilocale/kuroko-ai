@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Loader2, Search } from "lucide-react";
 
+import { JumpToLatest } from "@/components/JumpToLatest";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { EntityEvent } from "@/lib/types";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 
 interface Props {
   entities: EntityEvent[];
@@ -13,6 +15,12 @@ interface Props {
 export function KeywordsPanel({ entities }: Props) {
   const [term, setTerm] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const last = entities[entities.length - 1];
+  const { ref, stuck, onScroll, jumpToBottom } = useStickToBottom([
+    entities.length,
+    last?.definition,
+    last?.loading,
+  ]);
 
   const submit = async () => {
     const t = term.trim();
@@ -29,7 +37,7 @@ export function KeywordsPanel({ entities }: Props) {
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+    <section className="relative flex h-full min-h-0 flex-col rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
       <header className="flex items-center justify-between border-b border-[color:var(--color-border)] px-3 py-2">
         <h2 className="text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-fg-muted)]">
           キーワード
@@ -68,7 +76,11 @@ export function KeywordsPanel({ entities }: Props) {
         </Button>
       </form>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2.5">
+      <div
+        ref={ref}
+        onScroll={onScroll}
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2.5"
+      >
         {entities.length === 0 ? (
           <div className="pt-6 text-center text-[12px] text-[color:var(--color-fg-subtle)]">
             会話から抽出 / 手動で入力
@@ -96,6 +108,10 @@ export function KeywordsPanel({ entities }: Props) {
           </ul>
         )}
       </div>
+
+      {!stuck && entities.length > 0 && (
+        <JumpToLatest onClick={jumpToBottom} />
+      )}
     </section>
   );
 }

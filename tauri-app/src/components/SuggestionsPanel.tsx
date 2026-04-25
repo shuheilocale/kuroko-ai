@@ -21,7 +21,7 @@ export function SuggestionsPanel({ state }: Props) {
     state.suggesting || state.suggestion_style.length > 0;
 
   return (
-    <section className="flex h-full flex-col rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+    <section className="flex h-full min-h-0 flex-col rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
       <header className="flex items-center justify-between border-b border-[color:var(--color-border)] px-3 py-2">
         <h2 className="text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-fg-muted)]">
           応答候補
@@ -55,7 +55,7 @@ export function SuggestionsPanel({ state }: Props) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {state.suggestions.length === 0 ? (
           <div className="pt-12 text-center text-[13px] text-[color:var(--color-fg-subtle)]">
             {state.suggesting

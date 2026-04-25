@@ -29,17 +29,23 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden p-3 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <TranscriptPanel transcripts={state?.transcripts ?? []} />
-        {state ? (
-          <SuggestionsPanel state={state} />
-        ) : (
-          <PanelPlaceholder label="応答候補" />
-        )}
+      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden p-3 grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="row-span-2 min-h-0">
+          <TranscriptPanel transcripts={state?.transcripts ?? []} />
+        </div>
+        <div className="min-h-0">
+          {state ? (
+            <SuggestionsPanel state={state} />
+          ) : (
+            <PanelPlaceholder label="応答候補" />
+          )}
+        </div>
+        <div className="min-h-0">
+          <KeywordsPanel entities={state?.entities ?? []} />
+        </div>
       </div>
 
-      <div className="grid h-[260px] shrink-0 grid-cols-3 gap-3 px-3 pb-3 grid-rows-[minmax(0,1fr)]">
-        <KeywordsPanel entities={state?.entities ?? []} />
+      <div className="grid h-[260px] shrink-0 grid-cols-2 gap-3 px-3 pb-3 grid-rows-[minmax(0,1fr)]">
         <ProfilePanel
           profile={
             state?.profile ?? { name: null, facts: [], summary: "" }
