@@ -49,6 +49,24 @@ class Pipeline:
         self._turn_taking_monitor = None
         self._whisper_playback = None
         self._tts_end_time: float = 0.0
+        # Timestamp of the newest transcript when the last auto-fire
+        # happened. Used to suppress repeat firings during silence: we
+        # only fire if at least one transcript has arrived since.
+        self._last_fire_transcript_ts: float = 0.0
+        # Monotonic time of the last silence-rescue trigger so the loop
+        # doesn't re-fire while the silence persists.
+        self._last_silence_rescue_mono: float = 0.0
+        # Speculative pre-fire generation: a background suggester call
+        # started before p_now crosses the trigger threshold so its
+        # result can be reused if the trigger then confirms.
+        self._spec_task: asyncio.Task | None = None
+        self._spec_started_mono: float = 0.0
+        self._spec_style: str = ""
+        self._spec_suggestions: list[str] | None = None
+        # Last dominant emotion seen in the face loop, used to fire a
+        # chime when it transitions into "concern".
+        self._prev_dominant_emotion: str = "neutral"
+        self._last_concern_alert_mono: float = 0.0
 
     def get_state(self) -> PipelineState:
         with self._lock:
@@ -110,6 +128,54 @@ class Pipeline:
                 auto_suggestion_pending=(
                     self.state.auto_suggestion_pending
                 ),
+                llm_backend=self.config.llm_backend,
+                ollama_model=self.config.ollama_model,
+                llamacpp_url=self.config.llamacpp_url,
+                auto_suggest_style=self.config.auto_suggest_style,
+                turn_taking_threshold=self.config.turn_taking_threshold,
+                turn_taking_cooldown_sec=(
+                    self.config.turn_taking_cooldown_sec
+                ),
+                turn_taking_min_transcripts=(
+                    self.config.turn_taking_min_transcripts
+                ),
+                llm_context_mode=self.config.llm_context_mode,
+                llm_context_turns=self.config.llm_context_turns,
+                screen_region=(
+                    self._screen_capture.region
+                    if self._screen_capture
+                    else (0, 0, 0, 0)
+                ),
+                screen_monitor=self.config.screen_monitor,
+                silence_seconds=(
+                    max(
+                        0.0,
+                        time.time()
+                        - self.state.transcripts[-1].timestamp,
+                    )
+                    if self.state.transcripts
+                    else 0.0
+                ),
+                silence_rescue_enabled=(
+                    self.config.silence_rescue_enabled
+                ),
+                silence_rescue_seconds=(
+                    self.config.silence_rescue_seconds
+                ),
+                silence_rescue_style=(
+                    self.config.silence_rescue_style
+                ),
+                speculative_pre_fire_enabled=(
+                    self.config.speculative_pre_fire_enabled
+                ),
+                last_whisper_text=self.state.last_whisper_text,
+                meeting_context=self.config.meeting_context,
+                adapt_style_to_emotion=(
+                    self.config.adapt_style_to_emotion
+                ),
+                concern_alert_enabled=(
+                    self.config.concern_alert_enabled
+                ),
             )
 
     def add_manual_keyword(self, term: str):
@@ -128,6 +194,34 @@ class Pipeline:
             self._loop,
         )
 
+    def request_replay(self) -> bool:
+        """Replay the last whispered suggestion. Returns True if a
+        replay was scheduled, False if there's nothing to replay or
+        TTS is busy."""
+        if self._loop is None:
+            return False
+        with self._lock:
+            text = self.state.last_whisper_text
+            playing = self.state.tts_playing
+        if not text or playing or not self._whisper_playback:
+            return False
+        asyncio.run_coroutine_threadsafe(
+            self._replay_last_whisper(text), self._loop
+        )
+        return True
+
+    async def _replay_last_whisper(self, text: str) -> None:
+        if not self._whisper_playback:
+            return
+        with self._lock:
+            self.state.tts_playing = True
+        try:
+            await self._whisper_playback.speak(text)
+        finally:
+            with self._lock:
+                self.state.tts_playing = False
+                self._tts_end_time = time.monotonic()
+
     def request_stop(self):
         """Request the pipeline to stop. Safe to call from any thread."""
         if self._loop is None:
@@ -135,12 +229,84 @@ class Pipeline:
         for task in self._tasks:
             self._loop.call_soon_threadsafe(task.cancel)
 
+    def get_screen_region(self) -> tuple[int, int, int, int]:
+        if self._screen_capture is None:
+            return (0, 0, 0, 0)
+        return self._screen_capture.region
+
+    def clear_screen_region(self) -> None:
+        if self._screen_capture is not None:
+            self._screen_capture.region = (0, 0, 0, 0)
+
+    async def select_screen_region(
+        self,
+    ) -> tuple[int, int, int, int] | None:
+        """Drive the native macOS region picker and apply the result."""
+        sc = self._screen_capture
+        if sc is None:
+            return None
+
+        loop = asyncio.get_event_loop()
+
+        def _select() -> tuple[int, int, int, int] | None:
+            import subprocess
+            import tempfile
+            from pathlib import Path
+
+            import cv2
+
+            mon_w, _ = sc.get_monitor_size()
+            tmp_sel = tempfile.mktemp(suffix=".png")
+            tmp_full = tempfile.mktemp(suffix=".png")
+            try:
+                subprocess.run(
+                    ["screencapture", "-x", tmp_full], timeout=10
+                )
+                ret = subprocess.run(
+                    ["screencapture", "-i", "-s", tmp_sel],
+                    timeout=120,
+                )
+                if ret.returncode != 0:
+                    return None
+                p = Path(tmp_sel)
+                if not p.exists() or p.stat().st_size == 0:
+                    return None
+                sel = cv2.imread(tmp_sel)
+                full = cv2.imread(tmp_full)
+                if sel is None or full is None:
+                    return None
+                sh, sw = sel.shape[:2]
+                scale = 2 if full.shape[1] > mon_w * 1.5 else 1
+                res = cv2.matchTemplate(
+                    full, sel, cv2.TM_CCOEFF_NORMED
+                )
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                if max_val > 0.7:
+                    mx, my = max_loc
+                    return (
+                        mx // scale,
+                        my // scale,
+                        sw // scale,
+                        sh // scale,
+                    )
+                return (0, 0, sw // scale, sh // scale)
+            finally:
+                Path(tmp_sel).unlink(missing_ok=True)
+                Path(tmp_full).unlink(missing_ok=True)
+
+        region = await loop.run_in_executor(None, _select)
+        if region is not None:
+            sc.region = region
+        return region
+
     def reset_state(self):
         """Clear all accumulated state for a fresh restart."""
         with self._lock:
             self.state = PipelineState()
         self._llm_task = None
         self._keyword_task = None
+        self._last_fire_transcript_ts = 0.0
+        self._reset_speculative_fire()
         self._keyword_processed_texts = []
         self._profile_task = None
         self._profile_processed_idx = 0
@@ -315,6 +481,10 @@ class Pipeline:
                 self._face_analysis_loop(),
                 name="face_analysis",
             ),
+            asyncio.create_task(
+                self._silence_rescue_loop(),
+                name="silence_rescue",
+            ),
         ]
 
         # MaAI turn-taking tasks
@@ -362,6 +532,56 @@ class Pipeline:
             with self._lock:
                 self.state.is_running = False
             logger.info("Pipeline stopped")
+
+    async def _silence_rescue_loop(self):
+        """Fire a topic-shifter when nobody has spoken for a while.
+
+        Bypasses the usual turn-taking trigger because by definition no
+        new transcript has arrived. Has its own cooldown so a single
+        silent stretch doesn't loop the whisper.
+        """
+        while True:
+            await asyncio.sleep(1.0)
+            if not self.config.silence_rescue_enabled:
+                continue
+            now = time.monotonic()
+            with self._lock:
+                if not self.state.transcripts:
+                    continue
+                if self.state.suggesting:
+                    continue
+                latest_t_ts = self.state.transcripts[-1].timestamp
+                last_fire_mono = (
+                    self.state.turn_taking.last_trigger_time
+                )
+                n_transcripts = len(self.state.transcripts)
+                ollama_ok = self.state.ollama_ok
+
+            min_t = self.config.turn_taking_min_transcripts
+            if n_transcripts < min_t or not ollama_ok:
+                continue
+            silence_for = time.time() - latest_t_ts
+            if silence_for < self.config.silence_rescue_seconds:
+                continue
+            cooldown = self.config.turn_taking_cooldown_sec
+            if now - last_fire_mono < cooldown:
+                continue
+            if (
+                now - self._last_silence_rescue_mono < cooldown
+            ):
+                continue
+
+            self._last_silence_rescue_mono = now
+            with self._lock:
+                self.state.turn_taking.last_trigger_time = now
+                self.state.suggesting = True
+            self._last_fire_transcript_ts = latest_t_ts
+            asyncio.create_task(
+                self._auto_suggest_and_whisper(
+                    style=self.config.silence_rescue_style,
+                    label_prefix="沈黙",
+                )
+            )
 
     async def _tee_queue(self, source, dest1, dest2):
         """Copy each item from source to both dest1 and dest2."""
@@ -424,6 +644,11 @@ class Pipeline:
                     )
                     suggesting = self.state.suggesting
                     last_trigger = tt.last_trigger_time
+                    latest_t_ts = (
+                        self.state.transcripts[-1].timestamp
+                        if self.state.transcripts
+                        else 0.0
+                    )
 
                 cooldown = (
                     self.config.turn_taking_cooldown_sec
@@ -431,37 +656,187 @@ class Pipeline:
                 min_t = (
                     self.config.turn_taking_min_transcripts
                 )
-                if (
-                    is_turn
+                # Only fire if a new transcript has arrived since the
+                # last fire — otherwise MaAI noise during silence would
+                # retrigger every cooldown_sec with nothing to respond
+                # to.
+                has_new_speech = (
+                    latest_t_ts > self._last_fire_transcript_ts
+                )
+                base_conditions = (
+                    has_new_speech
                     and now - last_trigger > cooldown
                     and not suggesting
                     and n_transcripts >= min_t
                     and self.state.ollama_ok
+                )
+
+                # Speculative pre-fire: warm up the LLM as soon as
+                # p_now climbs into the run-up zone so candidates are
+                # buffered by the time we cross the real threshold.
+                pre_offset = (
+                    self.config.speculative_pre_fire_offset
+                )
+                pre_fire_threshold = max(
+                    0.0, threshold - pre_offset
+                )
+                if (
+                    self.config.speculative_pre_fire_enabled
+                    and p_now >= pre_fire_threshold
+                    and base_conditions
                 ):
+                    spec_style = self.config.auto_suggest_style
+                    with self._lock:
+                        spec_transcripts = list(
+                            self.state.transcripts
+                        )
+                    spec_transcripts = (
+                        self._select_context_transcripts(
+                            spec_transcripts
+                        )
+                    )
+                    self._start_speculative_fire(
+                        spec_transcripts, spec_style
+                    )
+
+                if is_turn and base_conditions:
                     with self._lock:
                         tt.last_trigger_time = now
                         self.state.suggesting = True
+                        # X4: soften auto-style when the partner looks
+                        # concerned. Detection has to be live (not the
+                        # speculative style) so we read state here.
+                        face = self.state.face
+                    self._last_fire_transcript_ts = latest_t_ts
+                    style = self.config.auto_suggest_style
+                    if (
+                        self.config.adapt_style_to_emotion
+                        and face.detected
+                        and face.dominant_emotion == "concern"
+                    ):
+                        style = "共感"
+                    buffered = self._consume_speculative_fire(
+                        style
+                    )
                     asyncio.create_task(
-                        self._auto_suggest_and_whisper()
+                        self._auto_suggest_and_whisper(
+                            style=style,
+                            buffered_suggestions=buffered,
+                        )
                     )
 
         await asyncio.gather(
             feed_system(), feed_mic(), poll_predictions()
         )
 
-    async def _auto_suggest_and_whisper(self):
-        """Auto-generate a suggestion and TTS whisper it."""
-        style = self.config.auto_suggest_style
+    def _start_speculative_fire(
+        self,
+        transcripts: list[TranscriptEvent],
+        style: str,
+    ) -> None:
+        """Kick off an LLM call ahead of the actual fire trigger so the
+        candidates are already buffered when the threshold confirms."""
+        if (
+            self._spec_task is not None
+            and not self._spec_task.done()
+        ):
+            return
+        if self._spec_suggestions is not None:
+            return
+        if not transcripts:
+            return
+        self._spec_started_mono = time.monotonic()
+        self._spec_style = style
+        self._spec_suggestions = None
+        self._spec_task = asyncio.create_task(
+            self._suggester.suggest(transcripts, style),
+            name="speculative_suggest",
+        )
+
+        def _done(task: asyncio.Task) -> None:
+            try:
+                self._spec_suggestions = task.result()
+            except (asyncio.CancelledError, Exception):
+                self._spec_suggestions = None
+
+        self._spec_task.add_done_callback(_done)
+
+    def _consume_speculative_fire(
+        self, expected_style: str
+    ) -> list[str] | None:
+        """Take buffered speculative suggestions if fresh and matching,
+        otherwise return None and let the caller hit the LLM."""
+        if self._spec_suggestions is None:
+            return None
+        if self._spec_style != expected_style:
+            return None
+        age = time.monotonic() - self._spec_started_mono
+        if age > self.config.speculative_max_age_sec:
+            self._reset_speculative_fire()
+            return None
+        suggestions = self._spec_suggestions
+        self._reset_speculative_fire()
+        return suggestions
+
+    def _reset_speculative_fire(self) -> None:
+        if (
+            self._spec_task is not None
+            and not self._spec_task.done()
+        ):
+            self._spec_task.cancel()
+        self._spec_task = None
+        self._spec_started_mono = 0.0
+        self._spec_style = ""
+        self._spec_suggestions = None
+
+    def _select_context_transcripts(
+        self, transcripts: list[TranscriptEvent]
+    ) -> list[TranscriptEvent]:
+        """Trim transcripts based on llm_context_mode.
+
+        "fixed": pass-through; the suggester will tail by
+            llm_context_turns. "since_last_fire": only transcripts
+            after the last turn-taking trigger so each suggestion is
+            scoped to the new exchange.
+        """
+        if self.config.llm_context_mode != "since_last_fire":
+            return transcripts
+        last_mono = self.state.turn_taking.last_trigger_time
+        if last_mono <= 0:
+            return transcripts
+        # last_trigger_time is monotonic; transcript timestamps are
+        # epoch wall-clock. Convert via the current offset.
+        cutoff = time.time() - (time.monotonic() - last_mono)
+        return [t for t in transcripts if t.timestamp > cutoff]
+
+    async def _auto_suggest_and_whisper(
+        self,
+        style: str | None = None,
+        label_prefix: str = "自動",
+        buffered_suggestions: list[str] | None = None,
+    ):
+        """Auto-generate a suggestion and TTS whisper it.
+
+        If buffered_suggestions is provided (typically by speculative
+        pre-fire), the LLM call is skipped entirely and we go straight
+        to TTS — no waiting for round-trip latency.
+        """
+        if style is None:
+            style = self.config.auto_suggest_style
         with self._lock:
             self.state.suggesting = True
-            self.state.suggestion_style = f"[自動] {style}"
+            self.state.suggestion_style = f"[{label_prefix}] {style}"
             self.state.auto_suggestion_pending = True
             transcripts = list(self.state.transcripts)
 
+        transcripts = self._select_context_transcripts(transcripts)
         try:
-            suggestions = await self._suggester.suggest(
-                transcripts, style
-            )
+            if buffered_suggestions is not None:
+                suggestions = buffered_suggestions
+            else:
+                suggestions = await self._suggester.suggest(
+                    transcripts, style
+                )
             if suggestions:
                 with self._lock:
                     self.state.suggestions = suggestions
@@ -472,6 +847,7 @@ class Pipeline:
                 ):
                     with self._lock:
                         self.state.tts_playing = True
+                        self.state.last_whisper_text = suggestions[0]
                     try:
                         await self._whisper_playback.speak(
                             suggestions[0]
@@ -629,12 +1005,45 @@ class Pipeline:
                         self.state.face.neutral = (
                             face_state.emotions.neutral
                         )
-                        self.state.face.dominant_emotion = (
-                            face_state.emotions.dominant
+                        new_dominant = face_state.emotions.dominant
+                        prev_dominant = (
+                            self._prev_dominant_emotion
                         )
+                        self.state.face.dominant_emotion = (
+                            new_dominant
+                        )
+                        self._prev_dominant_emotion = new_dominant
                         self.state.face.nodding = (
                             face_state.nodding
                         )
+                        # Y6: alert chime on transition into concern.
+                        if (
+                            self.config.concern_alert_enabled
+                            and new_dominant == "concern"
+                            and prev_dominant != "concern"
+                            and self._whisper_playback is not None
+                        ):
+                            now_mono = time.monotonic()
+                            cooldown = (
+                                self.config
+                                .concern_alert_cooldown_sec
+                            )
+                            if (
+                                now_mono
+                                - self._last_concern_alert_mono
+                                > cooldown
+                            ):
+                                self._last_concern_alert_mono = (
+                                    now_mono
+                                )
+                                asyncio.create_task(
+                                    self._whisper_playback
+                                    .play_alert(
+                                        freq=440.0,
+                                        duration=0.10,
+                                        gain=0.18,
+                                    )
+                                )
                         self.state.face.nod_count = (
                             face_state.nod_count
                         )
@@ -806,6 +1215,7 @@ class Pipeline:
             self.state.suggestion_style = style
             transcripts = list(self.state.transcripts)
 
+        transcripts = self._select_context_transcripts(transcripts)
         try:
             suggestions = await self._suggester.suggest(transcripts, style)
             if suggestions:

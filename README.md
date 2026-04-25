@@ -1,124 +1,88 @@
 # ささやき女将 (Sasayaki Okami) — AI Meeting Assistant
 
-リアルタイム音声認識・ターンテイキング予測・音声合成を活用した会議支援ツール。会話の文字起こし、キーワード解説、相手プロファイル自動構築を行い、**相手の話が終わるタイミングを自動検出して、次に言うべきことをおばあちゃん声でささやいてくれます。**
+リアルタイム音声認識・ターンテイキング予測・音声合成を活用した 1on1 会議支援ツール。会話の文字起こし、キーワード解説、相手プロファイル自動構築を行い、**相手の話が終わるタイミングを自動検出して、次に言うべきことをおばあちゃん声で耳元にささやいてくれます**(あなたにだけ聞こえる、いわば音声カンニングペーパー)。
 
-**完全ローカル動作** — 音声認識 (mlx-whisper)、LLM (Ollama)、ターンテイキング予測 (MaAI)、音声合成 (OmniVoice)、表情分析 (MediaPipe) のすべてがローカルマシン上で動作します。クラウド API やサブスクリプションは不要です。キーワード解説で Wikipedia API を利用しますが、オフライン時は自動的にローカル LLM にフォールバックするため、**ネットワーク接続なしでも全機能が動作します。**（初回のみモデルダウンロードにネットワークが必要です）
+**完全ローカル動作** — 音声認識 (mlx-whisper)、LLM (llama.cpp / Ollama)、ターンテイキング予測 (MaAI)、音声合成 (OmniVoice)、表情分析 (MediaPipe) のすべてがローカルマシン上で動作します。クラウド API やサブスクリプションは不要です。キーワード解説で Wikipedia API を利用しますが、オフライン時は自動的にローカル LLM にフォールバックするため、**ネットワーク接続なしでも全機能が動作します**(初回のみモデルダウンロードにネットワークが必要)。
 
-## 機能
+## 主な機能
 
-- **リアルタイム文字起こし** — システム音声（相手の声）とマイク（自分の声）を同時に認識
-- **ターンテイキング予測** — MaAI (Voice Activity Projection) で相手の発話終了タイミングをリアルタイム予測
-- **自動応答候補生成 & TTS ささやき** — ターン交代を検出すると LLM で応答候補を生成し、OmniVoice で耳元にささやく
-- **手動応答候補生成** — 12種類のスタイルボタン（深堀り、褒める、知識でマウント等）で任意タイミングでも生成可能
-- **キーワード自動抽出・解説** — 会話中の専門用語を検出し、Wikipedia / LLM で解説
-- **相手プロフィール構築** — 会話から名前・仕事・趣味・スキルなどを自動的に抽出・蓄積
-- **表情分析** — MediaPipe で相手の表情（喜び・驚き・困惑）、うなずき、表情変化を検出
-- **完全ローカル & オフライン対応** — すべての AI 処理がローカルで完結。プライバシーセンシティブな会議でも安心
-- **Web UI** — NiceGUI によるブラウザベース UI（localhost:7860）
+- **リアルタイム文字起こし** — システム音声(相手)とマイク(自分)を同時認識
+- **ターンテイキング予測** — MaAI (VAP) で発話終了タイミングを予測 + **投機的先読み生成** で囁き開始までのレイテンシを最小化
+- **沈黙レスキュー** — 数秒間沈黙すると別スタイルで自動発火
+- **12 種スタイルの応答候補生成** — 深堀り / 褒める / 共感 / 話題転換 ほか
+- **耳元ささやき (TTS)** — OmniVoice + 同じデバイスから出力するチャイム(開始・終了)
+- **表情連動** — 相手が困表情になると自動で「共感」スタイルへ + 警告チャイム
+- **会議事前コンテキスト** — 相手・目的・トーンを文章で入れて応答品質を底上げ
+- **キーワード自動抽出 + Wiki/LLM 解説 + 手動検索**
+- **相手プロフィール自動構築** — 会話から名前・属性・事実を抽出
+- **完全ローカル & オフライン対応** — プライバシーセンシティブな会議でも安心
 
 ## アーキテクチャ
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  Audio Capture (sounddevice, 16kHz)              │
-│       System Audio (BlackHole 2ch)    Mic (MacBook Pro Mic)     │
-└──────────────┬─────────────────────────────┬────────────────────┘
-               │                             │
-               ▼                             ▼
-         ┌──────────┐                  ┌──────────┐
-         │ Tee Queue │                  │ Tee Queue │
-         └──┬────┬──┘                  └──┬────┬──┘
-            │    │                        │    │
-            ▼    ▼                        ▼    ▼
-     ┌──────┐  ┌──────────────────────────────────┐
-     │ VAD  │  │      MaAI Turn-Taking (VAP)      │
-     │Silero│  │ 512→160 sample resampling → Maai  │
-     └──┬───┘  │ p_now / p_future prediction      │
-        │      └──────────────┬───────────────────┘
-        ▼                     │
-  ┌───────────┐               │ p_now > threshold?
-  │    ASR    │               ▼
-  │mlx-whisper│        ┌─────────────┐
-  │ (Japanese)│        │ Auto-Suggest │
-  └─────┬─────┘        │ + TTS Whisper│
-        │              └──────┬──────┘
-        ▼                     │
-  ┌─────────────┐             │
-  │ Transcripts │             │
-  └──┬──┬──┬────┘             ▼
-     │  │  │          ┌──────────────┐
-     │  │  │          │  OmniVoice   │
-     │  │  │          │ TTS (24kHz)  │
-     │  │  │          │  → resample  │
-     │  │  │          │  → headphone │
-     │  │  │          └──────────────┘
-     ▼  ▼  ▼
-  ┌──────────────────────────────────┐
-  │         LLM (Ollama)             │
-  │  ┌──────────┐ ┌───────────────┐  │
-  │  │ Keyword  │ │   Profile     │  │
-  │  │Extraction│ │  Extraction   │  │
-  │  └──────────┘ └───────────────┘  │
-  └──────────────────────────────────┘
-     │  │  │
-     ▼  ▼  ▼
-  ┌──────────────────────────────────┐
-  │    Screen Capture (mss)          │
-  │    → MediaPipe FaceLandmarker    │
-  │    → Emotion / Nod Detection     │
-  └──────────────────────────────────┘
-     │
-     ▼
-  ┌──────────────────────────────────┐
-  │      NiceGUI Web UI              │
-  │      http://127.0.0.1:7860       │
-  │                                  │
-  │  ┌──────────────┬─────────────┐  │
-  │  │  文字起こし  │  応答候補   │  │
-  │  │  (transcript)│ (suggestions│  │
-  │  │              │  + auto TTS)│  │
-  │  ├──────┬───────┴──┬──────────┤  │
-  │  │ KW   │ Profile  │ 表情分析 │  │
-  │  └──────┴──────────┴──────────┘  │
-  └──────────────────────────────────┘
+```text
+┌──────────────────────────────────────────────┐
+│  Tauri Desktop App (.app / .dmg)             │
+│  ┌────────────────────────────────────────┐  │
+│  │ React + Vite + TS + Tailwind +         │  │
+│  │ shadcn/ui — Dark first                 │  │
+│  └────────────────────────────────────────┘  │
+│                  ▲                            │
+│                  │ WebSocket /ws/state (10Hz) │
+│                  │ HTTP /api/*                │
+│                  ▼                            │
+│  ┌────────────────────────────────────────┐  │
+│  │ Python sidecar (FastAPI + Uvicorn)     │  │
+│  │   sasayaki.api.server                  │  │
+│  │   sasayaki.pipeline.orchestrator       │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+              │
+              ▼ pipeline 内部
+  ┌──────────────────────────────────────────────────────┐
+  │ Audio Capture (sounddevice, 16kHz)                    │
+  │   System Audio (BlackHole 2ch) / Mic                  │
+  ├──────────────────────────────────────────────────────┤
+  │ Silero VAD → mlx-whisper ASR → Transcripts           │
+  │ MaAI (VAP)   → p_now / p_future                      │
+  │   ├─ pre-fire (≥ threshold-0.2) → speculative LLM    │
+  │   └─ fire    (≥ threshold)      → consume + TTS      │
+  │ OmniVoice TTS  → resample → headphones (TTS device)  │
+  │ MediaPipe FaceLandmarker → emotion / nod             │
+  │ LLM (llama.cpp / Ollama) → keyword / profile / sugg. │
+  └──────────────────────────────────────────────────────┘
 ```
 
 ### ディレクトリ構成
 
-```
-src/sasayaki/
-├── main.py                    # エントリーポイント
-├── config.py                  # Config dataclass（全設定値）
-├── types.py                   # 共有データ型（イベント・状態）
-├── audio/
-│   ├── capture.py             # sounddevice による音声キャプチャ
-│   ├── vad.py                 # Silero VAD による音声区間検出
-│   └── turn_taking.py         # MaAI ラッパー（ターンテイキング予測）
-├── asr/
-│   └── transcriber.py         # mlx-whisper によるリアルタイム文字起こし
-├── llm/
-│   ├── client.py              # LLM クライアント（Ollama / llama.cpp）
-│   ├── profiler.py            # 会話相手のプロフィール抽出
-│   └── suggester.py           # 応答候補生成（12スタイル）
-├── nlp/
-│   ├── keyword_extractor.py   # LLM によるキーワード抽出
-│   └── wiki.py                # Wikipedia 検索（LRU キャッシュ付き）
-├── tts/
-│   └── whisper_playback.py    # OmniVoice TTS + sounddevice 再生
-├── vision/
-│   ├── face_analyzer.py       # MediaPipe 表情分析・うなずき検出
-│   └── screen_capture.py      # mss による画面キャプチャ
-├── pipeline/
-│   └── orchestrator.py        # 全パイプラインのオーケストレーション
-└── ui/
-    └── app.py                 # NiceGUI Web UI
+```text
+.
+├── src/sasayaki/                # Python パッケージ
+│   ├── main.py                  # エントリ (uvicorn を起動)
+│   ├── config.py                # Config dataclass(全設定値)
+│   ├── types.py                 # 共有データ型
+│   ├── audio/                   # capture / vad / turn_taking
+│   ├── asr/                     # mlx-whisper
+│   ├── llm/                     # client (Ollama / llama.cpp) / suggester / profiler
+│   ├── nlp/                     # keyword_extractor / wiki
+│   ├── tts/                     # OmniVoice + chime 合成
+│   ├── vision/                  # face_analyzer / screen_capture
+│   ├── pipeline/                # 全体オーケストレーション
+│   └── api/                     # FastAPI + Pydantic schema
+└── tauri-app/                   # Tauri デスクトップシェル
+    ├── src/                     # React + TS フロント
+    │   ├── components/          # Header / Transcript / Suggestions / 各パネル
+    │   ├── lib/                 # api / store / types / hooks
+    │   └── styles/              # Tailwind v4 グローバル
+    └── src-tauri/               # Rust 側 (window 設定・bundle)
 ```
 
 ## 前提条件
 
-- **macOS** (Apple Silicon 推奨 — mlx-whisper は Apple Silicon に最適化)
+- **macOS** (Apple Silicon 推奨 — mlx-whisper は Apple Silicon 最適化)
 - **Python 3.12 以上**
-- **Ollama** (ローカル LLM サーバー)
+- **Node.js 18+ / pnpm 8+** (Tauri フロントのビルド用)
+- **Rust toolchain** (rustup 経由)
+- **llama.cpp** (デフォルト LLM バックエンド) もしくは **Ollama**
 - **BlackHole 2ch** (システム音声キャプチャ用仮想オーディオドライバ)
 
 ## セットアップ
@@ -130,111 +94,62 @@ git clone https://github.com/shuheilocale/kuroko-ai.git
 cd kuroko-ai
 ```
 
-### 2. uv のインストール（未導入の場合）
-
-[uv](https://docs.astral.sh/uv/) は高速な Python パッケージマネージャです。
+### 2. Python 環境
 
 ```bash
+# uv 未導入なら
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
-インストール後、シェルを再起動するか `source ~/.zshrc` を実行してください。
-
-### 3. Python 環境の構築
-
-```bash
-# Python 3.12 の仮想環境を作成
-uv venv --python 3.12
-
-# 仮想環境を有効化
-source .venv/bin/activate
-
-# 全依存パッケージをインストール（maai, omnivoice 含む）
+# 依存をインストール
 uv sync
 ```
 
-> **Note:** 初回の `uv sync` では PyTorch, Transformers, MediaPipe 等の大きなパッケージがダウンロードされるため、数分かかる場合があります。
-
-### 4. Ollama のセットアップ
-
-[Ollama](https://ollama.com) はローカルで LLM を動かすためのツールです。キーワード抽出・プロフィール構築・応答候補生成に使用します。
-
-#### 4-1. Ollama のインストール
+### 3. Tauri / Node 環境
 
 ```bash
-brew install ollama
+# Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Node + pnpm が無ければ Homebrew で
+brew install node pnpm
+
+# フロント側の依存
+cd tauri-app
+pnpm install
+cd ..
 ```
 
-#### 4-2. Ollama サーバーの起動
+### 4. LLM サーバ (デフォルトは llama.cpp)
 
 ```bash
-ollama serve
+brew install llama.cpp
+
+# Gemma 3n E2B GGUF を取得 (Ollama の "gemma4:e2b" 実体は Gemma 3n E2B)
+mkdir -p ~/models/gemma-3n-e2b
+uv run python -c "
+from huggingface_hub import hf_hub_download
+hf_hub_download(
+    repo_id='unsloth/gemma-3n-E2B-it-GGUF',
+    filename='gemma-3n-E2B-it-Q4_K_M.gguf',
+    local_dir='/Users/$USER/models/gemma-3n-e2b',
+)"
+
+# llama-server 起動 (デフォルトポート 8080)
+llama-server -m ~/models/gemma-3n-e2b/gemma-3n-E2B-it-Q4_K_M.gguf \
+  --port 8080 --ctx-size 4096 -ngl 99
 ```
 
-> **Tip:** バックグラウンドで起動したい場合は `brew services start ollama` を使ってください。
+> **Ollama を使う場合:** `brew install ollama && ollama serve` の後 `ollama pull gemma4:e2b` し、設定で「バックエンド」を Ollama に切り替えてください。
 
-#### 4-3. LLM モデルのダウンロード
-
-別のターミナルを開いて、使用するモデルをダウンロードします。
-
-```bash
-# デフォルトモデル
-ollama pull gemma4:e2b
-```
-
-他のモデルも使用可能です（UI のドロップダウンから切り替えられます）。
-
-#### 4-4. 動作確認
-
-```bash
-ollama list
-```
-
-`gemma4:e2b` が表示されれば OK です。
-
-### 5. BlackHole（仮想オーディオドライバ）のセットアップ
-
-BlackHole は相手の音声（Zoom、Teams 等のシステム音声）をアプリでキャプチャするために必要な仮想オーディオドライバです。
-
-#### 5-1. インストール
+### 5. BlackHole
 
 ```bash
 brew install blackhole-2ch
 ```
 
-#### 5-2. macOS Audio MIDI 設定
+その後 **Audio MIDI 設定** で「複数出力デバイス」を作成し、スピーカー/ヘッドホン + BlackHole 2ch にチェック。システム出力を作成したデバイスに変更してください。
 
-**重要:** BlackHole をインストールしただけでは、システム音声をキャプチャできません。以下の設定が必要です。
-
-1. **Audio MIDI 設定** アプリを開く
-   - Spotlight（`Cmd + Space`）で「Audio MIDI 設定」と検索
-   - または `/Applications/Utilities/Audio MIDI Setup.app` を直接開く
-
-2. **複数出力デバイスを作成**
-   - 左下の **「+」** ボタンをクリック
-   - **「複数出力デバイスを作成」** を選択
-
-3. **デバイスを選択**（以下の2つにチェック）
-   - 使用中のスピーカーまたはヘッドフォン
-   - **BlackHole 2ch**
-
-4. **システム出力を変更**
-   - **システム環境設定 → サウンド → 出力** を開く
-   - 作成した**複数出力デバイス**を選択
-
-これにより、システム音声がスピーカーと BlackHole の両方に送られ、アプリがシステム音声をキャプチャできるようになります。
-
-#### 5-3. 動作確認
-
-```bash
-uv run python scripts/check_audio_devices.py
-```
-
-出力に `BlackHole 2ch` が入力デバイスとして表示されれば OK です。
-
-### 6. MediaPipe モデルのダウンロード（表情分析用）
-
-表情分析機能を使用する場合、MediaPipe の FaceLandmarker モデルが必要です。
+### 6. MediaPipe FaceLandmarker
 
 ```bash
 mkdir -p models
@@ -242,238 +157,138 @@ curl -L -o models/face_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
-### 7. 起動
+## 起動 (開発時)
+
+ターミナル 3 枚:
 
 ```bash
+# Terminal 1: LLM サーバ
+llama-server -m ~/models/gemma-3n-e2b/gemma-3n-E2B-it-Q4_K_M.gguf \
+  --port 8080 --ctx-size 4096 -ngl 99
+
+# Terminal 2: Python API
 uv run sasayaki
+
+# Terminal 3: Tauri ウィンドウ
+cd tauri-app
+pnpm tauri dev
 ```
 
-ブラウザで **http://127.0.0.1:7860** を開きます。
-
-> **Note:** 初回起動時、MaAI と OmniVoice のモデルが HuggingFace から自動ダウンロードされます。数分かかる場合があります。
+初回起動時、MaAI / OmniVoice / Whisper のモデルが HuggingFace から自動ダウンロードされます(数分〜十数分)。
 
 ## 使い方
 
 ### 画面構成
 
-起動すると以下のレイアウトの Web UI が表示されます。
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ ささやき女将  [Sys: ██] [Mic: ██] [TT: ██ 0.45 ██ 0.32]│ ← ヘッダー
-├─────────────────────────────────────────────────────────┤
-│ ▶ 設定 (クリックで展開)                                 │ ← 折りたたみ設定
-├──────────────────────────┬──────────────────────────────┤
-│                          │                              │
-│   文字起こし             │   応答候補                   │
-│                          │   [自動ささやきモード: 深堀り]│
-│   18:30:45 こんにちは    │   [深堀り][褒める][批判的]... │
-│        はい、こんにちは  │                              │
-│   18:30:52 今日は...     │   1. ○○についてもう少し...   │
-│                          │   2. それは△△ということ...   │
-│                          │   3. 具体的には...           │
-│                          │                              │
-├────────┬─────────┬───────┴──────────────────────────────┤
-│ KW     │ Profile │ 表情分析                             │
-│ ─────  │ ─────── │ [喜 ██][驚 ██][困 ██][平 ██]        │
-│ 用語1  │ 名前    │ [顔画像] 検出中 — 喜び              │
-│  説明  │  山田   │ うなずき: 3                          │
-│ 用語2  │ 仕事    │ 表情変化                             │
-│  説明  │  エンジ │ 18:30:50 平常→喜び                  │
-└────────┴─────────┴──────────────────────────────────────┘
+```text
+┌──────────────────────────────────────────────────────────┐
+│ ● ささやき女将  mic ▮▮  sys ▮▮  turn ▮▮ 0.42  llama.cpp:ok │ Header
+├────────────────────────────────────┬─────────────────────┤
+│                                     │  応答候補           │
+│   文字起こし                        │  [深堀り][褒める]…   │
+│   (mic = 右 / 青 / 自分)            │  1. ...             │
+│   (sys = 左 / 紫 / 相手)            │  2. ...             │
+│                                     │  3. ...             │
+│                                     ├─────────────────────┤
+│                                     │  キーワード(⌘K)     │
+│                                     │  ...                │
+├────────────────────────────────────┴─────────────────────┤
+│ 相手のプロフィール    │   表情分析                         │
+│ 名前 / 事実カテゴリ   │   joy/surprise/concern/neutral     │
+└──────────────────────────────────────────────────────────┘
 ```
 
-**上段（メイン）:**
+### キーボードショートカット
 
-| エリア | 説明 |
-|--------|------|
-| 文字起こし | リアルタイムの会話テキスト。紫 = 相手、青 = 自分。自動スクロール |
-| 応答候補 | 自動 or 手動で生成された返答案。自動ささやきモードの選択も可能 |
+| キー | 動作 |
+| ---- | ---- |
+| `Space` | 直前の囁きを再再生(入力中はスキップ) |
+| `⌘ ,` | 設定シートを開く |
+| `⌘ K` | キーワード検索入力にフォーカス |
+| `Esc` | 設定シートを閉じる |
 
-**下段（サブ情報）:**
+### 設定シート(⌘,)
 
-| エリア | 説明 |
-|--------|------|
-| キーワード | 自動抽出された用語とその解説。手動検索も可能 |
-| プロフィール | 会話から自動構築された相手の情報（カテゴリ別） |
-| 表情分析 | 感情バー、顔サムネイル、うなずきカウント、表情変化ログ |
+| セクション | 内容 |
+| --- | --- |
+| 会議コンテキスト | 相手・目的・トーンを文章で。LLM プロンプトに常駐 |
+| オーディオ | システム音声 / マイク / TTS 出力デバイス |
+| LLM | バックエンド (Ollama / llama.cpp) / モデル / コンテキストモード(固定 N or 前回発火以降) |
+| ターンテイキング | MaAI ON/OFF / 閾値 / クールダウン / 最低件数 / 自動スタイル / 先読み生成 / 表情連動 / 困アラート |
+| 沈黙レスキュー | 自動発火 ON/OFF / 沈黙時間閾値 / 沈黙時のスタイル |
+| TTS | ウィスパー再生 / 開始 + 終了キュー音 |
+| 画面 (表情分析) | モニター選択 / 範囲選択(macOS ネイティブドラッグ) |
 
-### 設定パネル
+設定変更は **Hot reload** が効くもの(スタイル / 閾値 / コンテキスト等)は即反映、デバイスやモデルなど Cold な変更のみパイプライン再起動を伴います。
 
-ヘッダー下の **「設定」** をクリックすると展開されます。
+### TTS 出力デバイスは必ずヘッドフォンへ
 
-| 設定項目 | 説明 |
-|----------|------|
-| System Audio | 相手の音声を取り込むデバイス（通常は `BlackHole 2ch`） |
-| Mic | 自分のマイクデバイス |
-| Screen | 表情分析用のスクリーンキャプチャ対象モニター |
-| LLM / Model | LLM バックエンド（Ollama or llama.cpp）とモデル選択 |
-| Turn-Taking | MaAI ターンテイキング予測の ON/OFF |
-| TTS | OmniVoice 音声ささやきの ON/OFF |
-| TTS出力先 | ささやき音声の出力デバイス（ヘッドフォン推奨） |
+ささやきが BlackHole(システム音声側)に流れると相手の声として誤認識されます。**「TTS 出力デバイス」をヘッドフォンや専用デバイスに必ず指定してください**。
 
-設定を変更したら **「適用」** ボタンで反映されます。
+## ビルド (将来的な配布用)
 
-### 応答候補
+```bash
+cd tauri-app
+pnpm tauri build
+```
 
-**手動モード:** 12種類のスタイルボタンから好みを選んでクリック。
-
-| ボタン | 用途 |
-|--------|------|
-| 深堀り | 相手の発言の核心に迫る質問 |
-| 褒める | ポジティブなフィードバック |
-| 批判的 | 論理的な弱点の指摘 |
-| 矛盾指摘 | 発言内の矛盾の指摘 |
-| よいしょ | 相手を持ち上げる |
-| 共感 | 感情に寄り添う |
-| まとめる | 議論の整理 |
-| 話題転換 | 新しいトピックへ |
-| 具体例を求める | 事例・データを求める |
-| ボケる | ユーモアで場を和ませる |
-| 謝罪 | 誠意ある謝罪 |
-| 知識でマウント | 専門知識を披露 |
-
-**自動モード:** ターンテイキング予測（MaAI）が「相手が話し終わりそう」と判断すると、選択中のスタイルで自動生成し、OmniVoice でささやきます。モード表示:
-- **オレンジ「自動」バッジ** — 自動トリガーによる生成
-- **青「手動」バッジ** — ボタン押下による生成
-
-### TTS ささやき出力先の設定
-
-ささやき音声が BlackHole に流れてしまうと、相手の声として文字起こしされてしまいます。**TTS出力先を「外部ヘッドフォン」などの専用デバイスに設定してください。**
-
-> **Note:** TTS 再生中〜再生後2秒間はシステム音声の文字起こしを自動抑制する機能が組み込まれていますが、出力先を分離するのが最も確実です。
-
-## 設定リファレンス
-
-主な設定は `src/sasayaki/config.py` の `Config` クラスで管理されています。
-
-### 音声・認識
-
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| `system_audio_device` | `"BlackHole 2ch"` | システム音声デバイス名 |
-| `mic_device` | `"MacBook Proのマイク"` | マイクデバイス名 |
-| `sample_rate` | `16000` | サンプルレート (Hz) |
-| `vad_threshold` | `0.5` | 音声検出の閾値 |
-| `vad_min_silence_ms` | `700` | 無音判定までの最短時間 (ms) |
-| `whisper_model` | `"mlx-community/whisper-large-v3-turbo"` | Whisper モデル |
-| `whisper_language` | `"ja"` | 音声認識の言語 |
-
-### LLM
-
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| `llm_backend` | `"ollama"` | `"ollama"` or `"llamacpp"` |
-| `ollama_model` | `"gemma4:e2b"` | Ollama モデル名 |
-| `llamacpp_url` | `"http://127.0.0.1:8080"` | llama.cpp サーバー URL |
-| `llm_context_turns` | `5` | 応答候補生成時の文脈ターン数 |
-| `llm_debounce_sec` | `1.5` | プロフィール抽出のデバウンス (秒) |
-
-### ターンテイキング (MaAI)
-
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| `maai_enabled` | `True` | ターンテイキング予測の有効/無効 |
-| `maai_frame_rate` | `10` | 予測の Hz (5/10/20) |
-| `maai_device` | `"cpu"` | 推論デバイス |
-| `turn_taking_threshold` | `0.6` | p_now がこの値を超えたらトリガー |
-| `turn_taking_cooldown_sec` | `8.0` | 自動トリガーの最小間隔 (秒) |
-| `turn_taking_min_transcripts` | `3` | 最低発話数（少なすぎると誤トリガー） |
-| `auto_suggest_style` | `"深堀り"` | 自動ささやき時のスタイル |
-
-### TTS (OmniVoice)
-
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| `tts_enabled` | `True` | TTS ささやきの有効/無効 |
-| `tts_backend` | `"omnivoice"` | TTS エンジン |
-| `tts_omnivoice_model` | `"k2-fsa/OmniVoice"` | OmniVoice モデル |
-| `tts_omnivoice_instruct` | `"female, elderly, whisper, very low pitch"` | 声質の指定 |
-| `tts_omnivoice_speed` | `1.1` | 発話速度 |
-| `tts_output_device` | `""` | 出力デバイス名（空=デフォルト） |
-| `tts_volume` | `0.6` | 音量 (0.0〜1.0) |
-
-**`tts_omnivoice_instruct` で使用可能なキーワード:**
-
-- 性別: `male`, `female`
-- 年齢: `child`, `teenager`, `young adult`, `middle-aged`, `elderly`
-- ピッチ: `very low pitch`, `low pitch`, `moderate pitch`, `high pitch`, `very high pitch`
-- スタイル: `whisper`
-- アクセント: `american accent`, `british accent`, `japanese accent` 等
+> **Note:** 本リポジトリは現時点ではローカル開発前提で、Python sidecar の自動バンドル(PyInstaller)は未実装です。配布パッケージを作る場合は別途設定が必要です。
 
 ## トラブルシューティング
 
-### BlackHole が見つからない
+### llama-server が「expected 2012, got 601」で死ぬ
+
+Ollama 配布の GGUF(`~/.ollama/models/blobs/...`) は新しめのモデルで Ollama 独自のテンソル分割になっており、mainline の llama.cpp で読めません。**HuggingFace の公式 GGUF**(unsloth / bartowski 等)を使ってください。
+
+### BlackHole が見えない
 
 ```bash
 uv run python scripts/check_audio_devices.py
 ```
 
-`BlackHole 2ch` が入力デバイスとして表示されない場合:
-- `brew install blackhole-2ch` を再実行
-- Audio MIDI 設定で複数出力デバイスを再作成
-- macOS を再起動
+`BlackHole 2ch` が入力一覧に出なければ、`brew install blackhole-2ch` の再実行と Audio MIDI の複数出力デバイスを再作成してください。
 
-### Ollama に接続できない
+### マイクを後から繋いでも UI に出ない
 
-```bash
-# Ollama が起動しているか確認
-ollama list
+`/api/devices` は子プロセスで都度問い合わせるので、設定シートを **開き直す** だけで反映されます。再起動不要。
 
-# 起動していない場合
-ollama serve
-```
+### TTS がプチプチ音
 
-### モデルが見つからない
+OmniVoice (24kHz) と出力デバイスのサンプルレートが合わない場合に発生。`resampy` で自動リサンプルしていますが、改善しなければ TTS 出力先を別デバイスに変更してください。
 
-```bash
-ollama pull gemma4:e2b
-```
+### TTS が文字起こしされる
 
-### TTS がプチプチ音になる
+ささやきが BlackHole に漏れています。**設定シートの「TTS 出力デバイス」をヘッドフォンに**。再生中〜2 秒間のシステム音声抑制も組み込み済みです。
 
-TTS 出力先のデバイスのサンプルレートと OmniVoice の出力 (24kHz) が不一致の場合に発生します。`resampy` による自動リサンプリングが組み込まれていますが、改善しない場合は `tts_output_device` を別のデバイスに変更してみてください。
+### Tauri ウィンドウがドラッグできない
 
-### ささやき音声が文字起こしされる
-
-TTS 音声が BlackHole 経由でシステム音声として拾われています。対策:
-1. **TTS出力先をヘッドフォンに直接指定**（設定パネルの「TTS出力先」で変更）
-2. TTS 再生中の transcript 自動抑制が組み込み済み（2秒間のクールダウン）
-
-### ポートが使用中
-
-```bash
-lsof -ti:7860 | xargs kill -9
-uv run sasayaki
-```
-
-### MaAI / OmniVoice モデルのダウンロードが止まる
-
-初回起動時に HuggingFace からモデルがダウンロードされます。ネットワーク環境を確認してください。キャッシュは `~/.cache/huggingface/` に保存されるため、2回目以降は高速に起動します。
+ネイティブタイトルバー(現在の標準設定)で全域ドラッグ可能です。一度 `pnpm tauri dev` を再起動して config を再読込してください。
 
 ## 開発
 
 ```bash
-# 開発用依存関係のインストール
-uv pip install -e ".[dev]"
-
-# テスト
+# Python テスト
 uv run pytest
+
+# 型チェック (TS)
+cd tauri-app && pnpm build
+
+# Tauri 単体ビルドチェック
+cd tauri-app/src-tauri && cargo check
 ```
 
 ## 技術スタック
 
-| コンポーネント | ライブラリ | 用途 |
-|---------------|-----------|------|
-| 音声キャプチャ | sounddevice | マイク・システム音声の取り込み |
-| 音声区間検出 (VAD) | Silero VAD | 発話区間の検出 |
-| 音声認識 (ASR) | mlx-whisper | リアルタイム文字起こし (Apple Silicon 最適化) |
-| ターンテイキング | MaAI (VAP) | 発話終了タイミングの予測 |
-| LLM | Ollama (gemma4:e2b) | キーワード抽出・プロフィール構築・応答候補生成 |
-| 音声合成 (TTS) | OmniVoice | ささやき音声の生成 (600+ 言語対応) |
-| オーディオリサンプリング | resampy | TTS 出力のサンプルレート変換 |
-| 表情分析 | MediaPipe | 感情検出・うなずき検出 |
-| 画面キャプチャ | mss | 表情分析用のスクリーンキャプチャ |
-| 知識検索 | Wikipedia API | キーワードの解説取得 |
-| Web UI | NiceGUI | ブラウザベースのリアルタイム UI |
-| パッケージ管理 | uv + hatchling | 依存管理・ビルド |
+| レイヤ | ライブラリ |
+| --- | --- |
+| 音声キャプチャ | sounddevice (PortAudio) |
+| VAD | Silero VAD |
+| ASR | mlx-whisper (Apple Silicon 最適化) |
+| ターンテイキング | MaAI (Voice Activity Projection) |
+| LLM | llama.cpp (デフォルト) / Ollama (任意) |
+| TTS | OmniVoice (k2-fsa) |
+| 表情分析 | MediaPipe FaceLandmarker |
+| API サーバ | FastAPI + Uvicorn + Pydantic v2 |
+| デスクトップ | Tauri 2 + Rust |
+| フロント | React 19 + Vite 7 + TS 5.8 + Tailwind v4 + shadcn/ui + Zustand + Framer Motion |
+| パッケージ | uv (Python) + pnpm (Node) + cargo (Rust) |
