@@ -68,12 +68,18 @@ class WhisperPlayback:
             import torch
             from omnivoice import OmniVoice
 
+            requested = self.config.tts_omnivoice_device
+            if requested == "auto":
+                device = (
+                    "mps" if torch.backends.mps.is_available() else "cpu"
+                )
+            else:
+                device = requested
             self._omnivoice_model = OmniVoice.from_pretrained(
                 self.config.tts_omnivoice_model,
-                device_map="cpu",
+                device_map=device,
                 dtype=torch.float32,
             )
-            device = "cpu"
             logger.info(
                 "OmniVoice loaded (device=%s)", device
             )

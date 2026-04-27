@@ -100,6 +100,9 @@ class Config:
         "female, elderly, whisper, very low pitch"
     )
     tts_omnivoice_speed: float = 1.1
+    # OmniVoice 推論デバイス。"auto" で MPS が使えれば MPS、なければ CPU。
+    # CPU + fp32 比で MPS は約 3 倍速いので Apple Silicon では既定で MPS。
+    tts_omnivoice_device: str = "auto"
     tts_output_device: str = ""
     tts_volume: float = 0.6
     # Short attention-grabbing chime mixed in just before each whisper
