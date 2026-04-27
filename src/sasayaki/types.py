@@ -102,6 +102,7 @@ class PipelineState:
     error: str | None = None
     system_device: str = ""
     mic_device: str = ""
+    tts_output_device: str = ""
     ollama_ok: bool = False
     system_level: float = 0.0
     mic_level: float = 0.0

@@ -71,6 +71,7 @@ export interface PipelineState {
   error: string | null;
   system_device: string;
   mic_device: string;
+  tts_output_device: string;
   ollama_ok: boolean;
   system_level: number;
   mic_level: number;
