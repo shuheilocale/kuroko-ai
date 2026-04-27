@@ -183,7 +183,10 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                 </Field>
                 <Field label="TTS 出力">
                   <Select
-                    value={pick("tts_output_device", "")}
+                    value={pick(
+                      "tts_output_device",
+                      state?.tts_output_device ?? "",
+                    )}
                     options={["", ...outputNames]}
                     onChange={(v) => set("tts_output_device", v)}
                     placeholder="(システム既定)"

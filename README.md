@@ -124,22 +124,27 @@ cd ..
 ```bash
 brew install llama.cpp
 
-# Gemma 3n E2B GGUF を取得 (Ollama の "gemma4:e2b" 実体は Gemma 3n E2B)
-mkdir -p ~/models/gemma-3n-e2b
+# Gemma 4 E2B GGUF を取得 (推奨。最新世代・128K コンテキスト)
+mkdir -p ~/models/gemma-4-e2b
 uv run python -c "
 from huggingface_hub import hf_hub_download
 hf_hub_download(
-    repo_id='unsloth/gemma-3n-E2B-it-GGUF',
-    filename='gemma-3n-E2B-it-Q4_K_M.gguf',
-    local_dir='/Users/$USER/models/gemma-3n-e2b',
+    repo_id='unsloth/gemma-4-E2B-it-GGUF',
+    filename='gemma-4-E2B-it-Q4_K_M.gguf',
+    local_dir='/Users/$USER/models/gemma-4-e2b',
 )"
 
 # llama-server 起動 (デフォルトポート 8080)
-llama-server -m ~/models/gemma-3n-e2b/gemma-3n-E2B-it-Q4_K_M.gguf \
-  --port 8080 --ctx-size 4096 -ngl 99
+# Gemma 4 は thinking モード搭載。本アプリは reasoning_content を読まないので
+# --reasoning off を付けて推論トークンが content を消費するのを避ける。
+llama-server -m ~/models/gemma-4-e2b/gemma-4-E2B-it-Q4_K_M.gguf \
+  --port 8080 --ctx-size 8192 -ngl 99 \
+  --reasoning off
 ```
 
-> **Ollama を使う場合:** `brew install ollama && ollama serve` の後 `ollama pull gemma4:e2b` し、設定で「バックエンド」を Ollama に切り替えてください。
+> **旧モデル (Gemma 3n E2B) を使う場合:** `unsloth/gemma-3n-E2B-it-GGUF` から `gemma-3n-E2B-it-Q4_K_M.gguf` を取得。Gemma 3n は thinking モード非搭載なので `--reasoning off` は不要。
+
+> **Ollama を使う場合:** `brew install ollama && ollama serve` の後 `ollama pull gemma4:e2b` (もしくは `gemma3n:e2b`) を実行し、設定で「バックエンド」を Ollama に切り替えてください。`gemma4:e2b` と `gemma3n:e2b` は別世代の独立したモデル(Ollama 命名での同一エイリアスではない)。
 
 ### 5. BlackHole
 
@@ -163,8 +168,9 @@ curl -L -o models/face_landmarker.task \
 
 ```bash
 # Terminal 1: LLM サーバ
-llama-server -m ~/models/gemma-3n-e2b/gemma-3n-E2B-it-Q4_K_M.gguf \
-  --port 8080 --ctx-size 4096 -ngl 99
+llama-server -m ~/models/gemma-4-e2b/gemma-4-E2B-it-Q4_K_M.gguf \
+  --port 8080 --ctx-size 8192 -ngl 99 \
+  --reasoning off
 
 # Terminal 2: Python API
 uv run sasayaki
