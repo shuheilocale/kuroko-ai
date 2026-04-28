@@ -87,6 +87,12 @@ class Pipeline:
                 system_device=self.state.system_device,
                 mic_device=self.state.mic_device,
                 tts_output_device=self.config.tts_output_device,
+                tts_omnivoice_ref_audio=(
+                    self.config.tts_omnivoice_ref_audio
+                ),
+                tts_omnivoice_ref_text=(
+                    self.config.tts_omnivoice_ref_text
+                ),
                 ollama_ok=self.state.ollama_ok,
                 system_level=self._system_capture.level if self._system_capture else 0.0,
                 mic_level=self._mic_capture.level if self._mic_capture else 0.0,

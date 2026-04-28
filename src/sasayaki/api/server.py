@@ -92,6 +92,8 @@ COLD_FIELDS: frozenset[str] = frozenset(
         "tts_omnivoice_speed",
         "tts_output_device",
         "tts_volume",
+        "tts_omnivoice_ref_audio",
+        "tts_omnivoice_ref_text",
         "llm_backend",
         "ollama_model",
         "llamacpp_url",

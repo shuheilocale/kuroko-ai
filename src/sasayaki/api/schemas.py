@@ -74,6 +74,8 @@ class PipelineStateSchema(_Base):
     system_device: str = ""
     mic_device: str = ""
     tts_output_device: str = ""
+    tts_omnivoice_ref_audio: str = ""
+    tts_omnivoice_ref_text: str = ""
     ollama_ok: bool = False
     system_level: float = 0.0
     mic_level: float = 0.0
@@ -133,6 +135,8 @@ class SettingsPatch(BaseModel):
     system_audio_device: str | None = None
     mic_device: str | None = None
     tts_output_device: str | None = None
+    tts_omnivoice_ref_audio: str | None = None
+    tts_omnivoice_ref_text: str | None = None
     screen_monitor: int | None = None
     llm_backend: Literal["ollama", "llamacpp"] | None = None
     ollama_model: str | None = None

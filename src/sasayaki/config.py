@@ -103,6 +103,15 @@ class Config:
     # OmniVoice 推論デバイス。"auto" で MPS が使えれば MPS、なければ CPU。
     # CPU + fp32 比で MPS は約 3 倍速いので Apple Silicon では既定で MPS。
     tts_omnivoice_device: str = "auto"
+    # Voice clone 用の参照音声と書き起こし。両方が指定されたとき
+    # `instruct` ではなく cloning モードで合成される。
+    # 推奨: 3-10 秒のクリーンな朗読(WAV/FLAC など)。
+    tts_omnivoice_ref_audio: str = ""
+    tts_omnivoice_ref_text: str = ""
+    # クローン時のみ使う iterative decoding ステップ数。OmniVoice の既定
+    # (32 前後) は重いので、品質を大きく落とさない 16 にする。
+    # 上げると品質微増・遅くなる。下げると逆。
+    tts_omnivoice_clone_num_step: int = 16
     tts_output_device: str = ""
     tts_volume: float = 0.6
     # Short attention-grabbing chime mixed in just before each whisper

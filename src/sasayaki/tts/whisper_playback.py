@@ -40,6 +40,10 @@ class WhisperPlayback:
         self._playing = False
         self._device_index = self._resolve_device()
         self._omnivoice_model = None
+        # Pre-encoded reference for voice cloning. Populated lazily after
+        # the model is loaded; reused across syntheses so we don't pay
+        # the encode cost per whisper.
+        self._voice_clone_prompt = None
 
     def _resolve_device(self) -> int | None:
         """Find output device index by name."""
@@ -83,7 +87,48 @@ class WhisperPlayback:
             logger.info(
                 "OmniVoice loaded (device=%s)", device
             )
+            self._build_voice_clone_prompt()
         return self._omnivoice_model
+
+    def _build_voice_clone_prompt(self) -> None:
+        """Encode the configured reference audio once so subsequent
+        syntheses skip the per-call ref encode cost. Silently no-ops
+        when the user hasn't configured a reference.
+
+        Loads the audio via soundfile and hands OmniVoice a
+        (waveform, sample_rate) tuple. Going through OmniVoice's
+        string-path branch hits torchaudio, which now requires the
+        optional torchcodec dependency we don't pull in.
+        """
+        ref_audio_path = self.config.tts_omnivoice_ref_audio
+        if not ref_audio_path:
+            return
+        ref_text = self.config.tts_omnivoice_ref_text or None
+        try:
+            import soundfile as sf
+            import torch
+
+            wav_np, sr = sf.read(ref_audio_path, dtype="float32")
+            if wav_np.ndim == 2:  # stereo → mono
+                wav_np = wav_np.mean(axis=1)
+            wav = torch.from_numpy(wav_np).unsqueeze(0)  # (1, T)
+            self._voice_clone_prompt = (
+                self._omnivoice_model.create_voice_clone_prompt(
+                    ref_audio=(wav, sr),
+                    ref_text=ref_text,
+                )
+            )
+            logger.info(
+                "Voice clone prompt ready (ref_audio=%s, %.1fs)",
+                ref_audio_path,
+                wav.shape[-1] / sr,
+            )
+        except Exception:
+            logger.exception(
+                "Voice clone prompt build failed, "
+                "falling back to instruct mode"
+            )
+            self._voice_clone_prompt = None
 
     async def play_alert(
         self,
@@ -144,11 +189,19 @@ class WhisperPlayback:
 
     def _generate_and_play(self, text: str):
         model = self._get_omnivoice()
-        audio = model.generate(
-            text=text,
-            instruct=self.config.tts_omnivoice_instruct,
-            speed=self.config.tts_omnivoice_speed,
-        )
+        if self._voice_clone_prompt is not None:
+            audio = model.generate(
+                text=text,
+                voice_clone_prompt=self._voice_clone_prompt,
+                speed=self.config.tts_omnivoice_speed,
+                num_step=self.config.tts_omnivoice_clone_num_step,
+            )
+        else:
+            audio = model.generate(
+                text=text,
+                instruct=self.config.tts_omnivoice_instruct,
+                speed=self.config.tts_omnivoice_speed,
+            )
         # audio is a list of tensors, shape (1, T)
         waveform = audio[0].squeeze(0).cpu().numpy()
         waveform = np.asarray(
