@@ -192,6 +192,22 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     placeholder="(システム既定)"
                   />
                 </Field>
+                <Field label="TTS ループバック抑制">
+                  <Switch
+                    checked={pick(
+                      "tts_loopback_suppress",
+                      state?.tts_loopback_suppress ?? true,
+                    )}
+                    onChange={(v: boolean) =>
+                      set("tts_loopback_suppress", v)
+                    }
+                  />
+                </Field>
+                <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+                  TTS 中(+ 直後 2 秒)の SYS 文字起こしを破棄する。TTS が
+                  ヘッドフォンなど独立デバイスに出ているなら OFF 推奨
+                  (相手の発話を取りこぼさないため)
+                </span>
               </Section>
 
               <Section title="ボイスクローン">

@@ -74,6 +74,7 @@ export interface PipelineState {
   tts_output_device: string;
   tts_omnivoice_ref_audio: string;
   tts_omnivoice_ref_text: string;
+  tts_loopback_suppress: boolean;
   ollama_ok: boolean;
   system_level: number;
   mic_level: number;

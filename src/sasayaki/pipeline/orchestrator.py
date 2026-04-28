@@ -93,6 +93,9 @@ class Pipeline:
                 tts_omnivoice_ref_text=(
                     self.config.tts_omnivoice_ref_text
                 ),
+                tts_loopback_suppress=(
+                    self.config.tts_loopback_suppress
+                ),
                 ollama_ok=self.state.ollama_ok,
                 system_level=self._system_capture.level if self._system_capture else 0.0,
                 mic_level=self._mic_capture.level if self._mic_capture else 0.0,
@@ -888,9 +891,15 @@ class Pipeline:
         while True:
             event: TranscriptEvent = await transcript_q.get()
 
-            # Suppress system transcripts during/after
-            # TTS to avoid picking up our own whisper
-            if event.source == "system":
+            # Suppress system transcripts during/after TTS to avoid
+            # picking up our own whisper when TTS leaks into the system
+            # audio capture device. Only meaningful when TTS output and
+            # system input share a device path; the user can disable it
+            # when TTS goes to an isolated device (e.g. headphones).
+            if (
+                event.source == "system"
+                and self.config.tts_loopback_suppress
+            ):
                 with self._lock:
                     playing = self.state.tts_playing
                 elapsed = (

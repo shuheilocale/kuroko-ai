@@ -105,6 +105,7 @@ class PipelineState:
     tts_output_device: str = ""
     tts_omnivoice_ref_audio: str = ""
     tts_omnivoice_ref_text: str = ""
+    tts_loopback_suppress: bool = True
     ollama_ok: bool = False
     system_level: float = 0.0
     mic_level: float = 0.0

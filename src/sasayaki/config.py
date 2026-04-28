@@ -112,6 +112,12 @@ class Config:
     # (32 前後) は重いので、品質を大きく落とさない 16 にする。
     # 上げると品質微増・遅くなる。下げると逆。
     tts_omnivoice_clone_num_step: int = 16
+    # TTS 再生中(+ 直後 2 秒)の system 文字起こしを破棄するか。
+    # TTS が BlackHole 等システム音声側のデバイスに漏れていると、自分の
+    # ささやきが「相手の発言」として再認識される。それを避けるための
+    # 抑制。TTS 出力を独立デバイス(ヘッドフォン専用)にしている場合は
+    # 抑制が逆効果(本物の相手発言を捨てる)になるので False に。
+    tts_loopback_suppress: bool = True
     tts_output_device: str = ""
     tts_volume: float = 0.6
     # Short attention-grabbing chime mixed in just before each whisper
