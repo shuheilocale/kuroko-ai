@@ -192,6 +192,54 @@ export function SettingsSheet({ open, onClose, state }: Props) {
                     placeholder="(システム既定)"
                   />
                 </Field>
+                <Field label="TTS ループバック抑制">
+                  <Switch
+                    checked={pick(
+                      "tts_loopback_suppress",
+                      state?.tts_loopback_suppress ?? true,
+                    )}
+                    onChange={(v: boolean) =>
+                      set("tts_loopback_suppress", v)
+                    }
+                  />
+                </Field>
+                <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+                  TTS 中(+ 直後 2 秒)の SYS 文字起こしを破棄する。TTS が
+                  ヘッドフォンなど独立デバイスに出ているなら OFF 推奨
+                  (相手の発話を取りこぼさないため)
+                </span>
+              </Section>
+
+              <Section title="ボイスクローン">
+                <Field label="参照音声 (ファイルパス)">
+                  <Input
+                    value={pick(
+                      "tts_omnivoice_ref_audio",
+                      state?.tts_omnivoice_ref_audio ?? "",
+                    )}
+                    placeholder="/絶対パス/sample.wav (空ならクローン無効)"
+                    onChange={(e) =>
+                      set("tts_omnivoice_ref_audio", e.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="参照音声の書き起こし">
+                  <Textarea
+                    value={pick(
+                      "tts_omnivoice_ref_text",
+                      state?.tts_omnivoice_ref_text ?? "",
+                    )}
+                    placeholder="参照音声で実際に話されている内容(句読点含む)"
+                    rows={3}
+                    onChange={(e) =>
+                      set("tts_omnivoice_ref_text", e.target.value)
+                    }
+                  />
+                </Field>
+                <span className="text-[10.5px] text-[color:var(--color-fg-subtle)]">
+                  3〜10秒のクリーンな朗読推奨。両方を指定するとクローン音声で
+                  ささやかれます。空にすると下記 instruct のスタイルに戻ります
+                </span>
               </Section>
 
               <Section title="LLM">

@@ -11,3 +11,5 @@ build/
 *.wav
 *.mp3
 models/*.task
+# Personal voice-clone reference transcripts (paired with the *.wav above)
+sasayaki.txt
